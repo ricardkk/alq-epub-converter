@@ -1,4 +1,4 @@
-//! Testes de integração da CLI Rust (`alq`), validação de caminhos e runner Python.
+//! Testes de integração da CLI Rust (`alq`), validação de caminhos, contrato JSON v1 e runner Python.
 
 use std::fs::File;
 use std::io::Write;
@@ -11,8 +11,11 @@ use tempfile::TempDir;
 use alq::cli::{Cli, Commands, ConvertArgs, InspectArgs};
 use alq::commands::{execute, run_convert_command, run_inspect_command};
 use alq::config::{resolve_default_output_path, validate_input_pdf, ConvertConfig, InspectConfig};
-use alq::error::{ErrorCode, EXIT_SUCCESS, EXIT_VALIDATION_ERROR};
-use alq::protocol::ResponseStatus;
+use alq::error::{ErrorCode, EXIT_RUNTIME_ERROR, EXIT_SUCCESS, EXIT_VALIDATION_ERROR};
+use alq::progress::{parse_stage_line, ProgressReporter, StageEvent};
+use alq::protocol::{
+    evaluate_worker_output, parse_worker_response, PageDimensions, ResponseStatus,
+};
 use alq::runner::PythonRunner;
 
 /// Cria um arquivo PDF mínimo válido com assinatura mágica `%PDF-`.
@@ -168,11 +171,18 @@ fn validation_rejects_non_pdf_files_with_invalid_input() {
     assert_eq!(err_fake.code(), "INVALID_INPUT");
     assert_eq!(err_fake.exit_code(), EXIT_VALIDATION_ERROR);
 
-    // Caso 3: arquivo .pdf vazio
+    // Caso 3: arquivo .pdf vazio (UnexpectedEof no read_exact)
     let empty_pdf = temp.path().join("vazio.pdf");
     std::fs::write(&empty_pdf, b"").expect("escrever pdf vazio");
     let err_empty = validate_input_pdf(&empty_pdf).expect_err("deve rejeitar pdf vazio");
     assert_eq!(err_empty.code(), "INVALID_INPUT");
+
+    // Caso 4: arquivo .pdf truncado (< 5 bytes)
+    let short_pdf = temp.path().join("curto.pdf");
+    std::fs::write(&short_pdf, b"%PDF").expect("escrever pdf curto");
+    let err_short =
+        validate_input_pdf(&short_pdf).expect_err("deve rejeitar pdf menor que 5 bytes");
+    assert_eq!(err_short.code(), "INVALID_INPUT");
 }
 
 #[test]
@@ -240,6 +250,184 @@ fn validation_rejects_output_equal_to_input_or_directory() {
 }
 
 #[test]
+fn contract_json_v1_validates_convert_and_inspect_success_payloads() {
+    let convert_json = r#"{
+        "schema_version": 1,
+        "status": "success",
+        "command": "convert",
+        "input": "/tmp/livro.pdf",
+        "output": "/tmp/livro.epub",
+        "metadata": {
+            "title": "Dom Casmurro",
+            "author": "Machado de Assis",
+            "language": "pt-BR",
+            "identifier": "urn:uuid:00000000-0000-0000-0000-000000000001"
+        },
+        "statistics": {
+            "pages": 120,
+            "pages_with_text": 118,
+            "pages_without_text": 2,
+            "chapters": 15,
+            "paragraphs": 850,
+            "images": 3,
+            "page_dimensions": {
+                "width": 595.0,
+                "height": 842.0
+            },
+            "needs_ocr": false
+        },
+        "warnings": ["Página 2 sem camada de texto."],
+        "duration_ms": 420
+    }"#;
+
+    let resp = evaluate_worker_output(Some(0), convert_json, "").expect("parse convert ok");
+    assert_eq!(resp.schema_version, 1);
+    assert_eq!(resp.status, ResponseStatus::Success);
+    assert_eq!(resp.input.as_deref(), Some("/tmp/livro.pdf"));
+    assert_eq!(resp.output.as_deref(), Some("/tmp/livro.epub"));
+    assert_eq!(resp.duration_ms, Some(420));
+    assert_eq!(resp.warnings, vec!["Página 2 sem camada de texto."]);
+
+    let meta = resp.metadata.expect("metadata presente");
+    assert_eq!(meta.title.as_deref(), Some("Dom Casmurro"));
+    assert_eq!(meta.author.as_deref(), Some("Machado de Assis"));
+    assert_eq!(meta.language.as_deref(), Some("pt-BR"));
+    assert_eq!(
+        meta.identifier.as_deref(),
+        Some("urn:uuid:00000000-0000-0000-0000-000000000001")
+    );
+
+    let stats = resp.statistics.expect("statistics presente");
+    assert_eq!(stats.pages, 120);
+    assert_eq!(stats.pages_with_text, 118);
+    assert_eq!(stats.pages_without_text, 2);
+    assert_eq!(stats.chapters, 15);
+    assert_eq!(stats.paragraphs, 850);
+    assert_eq!(stats.images, 3);
+    assert!(!stats.needs_ocr);
+    assert_eq!(
+        stats.page_dimensions,
+        Some(PageDimensions {
+            width: 595.0,
+            height: 842.0
+        })
+    );
+
+    let inspect_json = r#"{
+        "schema_version": 1,
+        "status": "success",
+        "command": "inspect",
+        "input": "/tmp/relatorio.pdf",
+        "metadata": {
+            "title": "Relatório",
+            "author": null,
+            "language": "pt-BR",
+            "identifier": null
+        },
+        "statistics": {
+            "pages": 5,
+            "pages_with_text": 0,
+            "pages_without_text": 5,
+            "chapters": 0,
+            "paragraphs": 0,
+            "images": 5,
+            "page_dimensions": {
+                "width": 612.0,
+                "height": 792.0
+            },
+            "needs_ocr": true
+        },
+        "warnings": [],
+        "duration_ms": 15
+    }"#;
+
+    let inspect_resp = evaluate_worker_output(Some(0), inspect_json, "").expect("parse inspect ok");
+    assert_eq!(inspect_resp.output, None);
+    assert!(inspect_resp.statistics.expect("stats").needs_ocr);
+}
+
+#[test]
+fn contract_json_v1_validates_errors_schema_and_status_consistency() {
+    // 1. Falha estruturada PDF_OPEN_FAILED e PDF_PASSWORD_REQUIRED
+    for (code, expected_enum) in [
+        ("PDF_OPEN_FAILED", ErrorCode::PdfOpenFailed),
+        ("PDF_PASSWORD_REQUIRED", ErrorCode::PdfPasswordRequired),
+        ("NO_EXTRACTABLE_TEXT", ErrorCode::NoExtractableText),
+        ("TEXT_EXTRACTION_FAILED", ErrorCode::TextExtractionFailed),
+        ("EPUB_BUILD_FAILED", ErrorCode::EpubBuildFailed),
+        ("EPUB_VALIDATION_FAILED", ErrorCode::EpubValidationFailed),
+        ("INVALID_INPUT", ErrorCode::InvalidInput),
+        ("INPUT_NOT_FOUND", ErrorCode::InputNotFound),
+    ] {
+        let err_json = format!(
+            r#"{{
+                "schema_version": 1,
+                "status": "error",
+                "error": {{
+                    "code": "{code}",
+                    "message": "Mensagem de teste para {code}"
+                }},
+                "warnings": []
+            }}"#
+        );
+        let err = evaluate_worker_output(Some(1), &err_json, "").expect_err("deve retornar erro");
+        assert_eq!(err.error_code(), expected_enum);
+        assert_eq!(err.code(), code);
+        assert!(err
+            .to_string()
+            .contains(&format!("Mensagem de teste para {code}")));
+    }
+
+    // 2. schema_version incompatível -> PROTOCOL_ERROR
+    let bad_schema = r#"{"schema_version": 2, "status": "success", "warnings": []}"#;
+    let err_schema = parse_worker_response(bad_schema).expect_err("deve rejeitar schema_version 2");
+    assert_eq!(err_schema.error_code(), ErrorCode::ProtocolError);
+
+    // 3. JSON malformado -> PROTOCOL_ERROR
+    let malformed = "{ isto nao e json valido ";
+    let err_malformed =
+        evaluate_worker_output(Some(0), malformed, "").expect_err("deve rejeitar JSON malformado");
+    assert_eq!(err_malformed.error_code(), ErrorCode::ProtocolError);
+
+    // 4. Inconsistência: exit_code != 0 mas status == "success" -> PROTOCOL_ERROR
+    let ok_json = r#"{"schema_version": 1, "status": "success", "warnings": []}"#;
+    let err_inconsistent_1 = evaluate_worker_output(Some(1), ok_json, "")
+        .expect_err("deve rejeitar exit_code 1 com status success");
+    assert_eq!(err_inconsistent_1.error_code(), ErrorCode::ProtocolError);
+
+    // 5. Inconsistência: exit_code == 0 mas status == "error" sem payload de erro válido -> PROTOCOL_ERROR
+    let err_no_payload = r#"{"schema_version": 1, "status": "error", "warnings": []}"#;
+    let err_inconsistent_2 = evaluate_worker_output(Some(0), err_no_payload, "")
+        .expect_err("deve rejeitar status error sem payload");
+    assert_eq!(err_inconsistent_2.error_code(), ErrorCode::ProtocolError);
+
+    // 6. Processo abortou sem JSON e exit_code != 0 -> PYTHON_EXECUTION_FAILED
+    let err_crash = evaluate_worker_output(Some(1), "", "Traceback: erro fatal")
+        .expect_err("deve retornar PYTHON_EXECUTION_FAILED");
+    assert_eq!(err_crash.error_code(), ErrorCode::PythonExecutionFailed);
+}
+
+#[test]
+fn progress_parser_and_reporter_handle_stage_lines() {
+    let stage = parse_stage_line("STAGE:2/5:Extraindo imagens").expect("stage válido");
+    assert_eq!(
+        stage,
+        StageEvent {
+            current: 2,
+            total: 5,
+            message: "Extraindo imagens".to_string()
+        }
+    );
+
+    let mut reporter = ProgressReporter::new(false);
+    reporter.handle_stderr_line("STAGE:1/3:Etapa 1");
+    reporter.handle_stderr_line("DEBUG: linha técnica");
+    reporter.handle_stderr_line("STAGE:3/3:Concluído");
+    reporter.finish();
+    assert_eq!(reporter.stages().len(), 2);
+}
+
+#[test]
 fn runner_invokes_python_stub_and_parses_json_response() {
     let temp = TempDir::new().expect("criar tempdir");
     let input = temp.path().join("teste.pdf");
@@ -261,7 +449,8 @@ fn runner_invokes_python_stub_and_parses_json_response() {
     assert_eq!(convert_resp.schema_version, 1);
     assert_eq!(convert_resp.status, ResponseStatus::Success);
     assert_eq!(convert_resp.command.as_deref(), Some("convert"));
-    assert_eq!(convert_resp.output_path.as_deref(), output.to_str());
+    assert_eq!(convert_resp.output.as_deref(), output.to_str());
+    assert!(convert_resp.statistics.is_some());
 
     // Testa inspect via runner e run_inspect_command
     let inspect_args = InspectArgs {
@@ -275,6 +464,7 @@ fn runner_invokes_python_stub_and_parses_json_response() {
     assert_eq!(inspect_resp.schema_version, 1);
     assert_eq!(inspect_resp.status, ResponseStatus::Success);
     assert_eq!(inspect_resp.command.as_deref(), Some("inspect"));
+    assert_eq!(inspect_resp.output, None);
 
     let cmd_inspect_resp =
         run_inspect_command(&inspect_args, &runner).expect("run_inspect_command deve funcionar");
@@ -289,7 +479,40 @@ fn runner_invokes_python_stub_and_parses_json_response() {
 }
 
 #[test]
-fn binary_supports_help_flags_and_exit_codes() {
+fn runner_handles_simulated_worker_error_and_missing_python_binary() {
+    let temp = TempDir::new().expect("criar tempdir");
+    let input = temp.path().join("simulado.pdf");
+    create_valid_pdf(&input);
+
+    let convert_args = ConvertArgs {
+        input: input.clone(),
+        output: None,
+        language: None,
+        debug: true,
+        overwrite: false,
+    };
+
+    // 1. Simulação de erro estruturado no subprocesso Python real (ALQ_SIMULATE_ERROR=PDF_OPEN_FAILED)
+    let runner_sim_err = PythonRunner::new().with_env("ALQ_SIMULATE_ERROR", "PDF_OPEN_FAILED");
+    let err = run_convert_command(&convert_args, &runner_sim_err)
+        .expect_err("deve capturar erro estruturado vindo do Python");
+    assert_eq!(err.error_code(), ErrorCode::PdfOpenFailed);
+    assert_eq!(err.code(), "PDF_OPEN_FAILED");
+    assert_eq!(err.exit_code(), EXIT_RUNTIME_ERROR);
+    assert!(err.to_string().contains("PDF_OPEN_FAILED"));
+
+    // 2. Falha de localização do Python quando executável não existe (PYTHON_NOT_FOUND)
+    let runner_missing_py =
+        PythonRunner::with_executable("/caminho/inexistente/python_nao_existe_alq");
+    let err_missing = run_convert_command(&convert_args, &runner_missing_py)
+        .expect_err("deve retornar PYTHON_NOT_FOUND");
+    assert_eq!(err_missing.error_code(), ErrorCode::PythonNotFound);
+    assert_eq!(err_missing.code(), "PYTHON_NOT_FOUND");
+    assert_eq!(err_missing.exit_code(), EXIT_RUNTIME_ERROR);
+}
+
+#[test]
+fn binary_supports_help_flags_simulated_errors_and_exit_codes() {
     let bin = env!("CARGO_BIN_EXE_alq");
 
     for args in [
@@ -332,4 +555,24 @@ fn binary_supports_help_flags_and_exit_codes() {
         .output()
         .expect("executar alq convert com PDF válido");
     assert_eq!(ok_out.status.code(), Some(EXIT_SUCCESS));
+
+    // Execução ponta a ponta com ALQ_SIMULATE_ERROR=PDF_PASSWORD_REQUIRED -> código 1
+    let sim_err_out = Command::new(bin)
+        .env("ALQ_SIMULATE_ERROR", "PDF_PASSWORD_REQUIRED")
+        .args(["inspect", valid_pdf.to_str().unwrap(), "--json"])
+        .output()
+        .expect("executar alq inspect com erro simulado");
+    assert_eq!(sim_err_out.status.code(), Some(EXIT_RUNTIME_ERROR));
+    let sim_stderr = String::from_utf8_lossy(&sim_err_out.stderr);
+    assert!(sim_stderr.contains("PDF_PASSWORD_REQUIRED"));
+
+    // Execução ponta a ponta com ALQ_PYTHON=/caminho/inexistente -> código 1 (PYTHON_NOT_FOUND)
+    let bad_py_out = Command::new(bin)
+        .env("ALQ_PYTHON", "/caminho/inexistente/python_invalido")
+        .args(["inspect", valid_pdf.to_str().unwrap()])
+        .output()
+        .expect("executar alq inspect com ALQ_PYTHON inválido");
+    assert_eq!(bad_py_out.status.code(), Some(EXIT_RUNTIME_ERROR));
+    let bad_py_stderr = String::from_utf8_lossy(&bad_py_out.stderr);
+    assert!(bad_py_stderr.contains("PYTHON_NOT_FOUND"));
 }

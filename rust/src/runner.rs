@@ -1,13 +1,15 @@
-//! Invocação segura do worker Python (`python -m alq`) via `std::process::Command`
-//! e leitura estruturada do Contrato JSON v1 no `stdout`.
+//! Invocação segura do worker Python (`python -m alq`) via `std::process::Command`,
+//! consumo de progresso (`stderr`) e validação estrita do Contrato JSON v1 (`stdout`).
 
 use std::ffi::OsString;
+use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use crate::config::{ConvertConfig, InspectConfig};
 use crate::error::{AlqError, Result};
-use crate::protocol::{parse_worker_response, WorkerResponse};
+use crate::progress::{is_debug_enabled, ProgressReporter};
+use crate::protocol::{evaluate_worker_output, WorkerResponse};
 
 /// Nome da variável de ambiente principal para sobrescrever o interpretador Python.
 pub const ENV_ALQ_PYTHON: &str = "ALQ_PYTHON";
@@ -20,6 +22,7 @@ pub const ENV_PDF2EPUB_PYTHON: &str = "PDF2EPUB_PYTHON";
 pub struct PythonRunner {
     python_bin: PathBuf,
     python_src_dir: Option<PathBuf>,
+    extra_env: Vec<(OsString, OsString)>,
 }
 
 impl Default for PythonRunner {
@@ -35,6 +38,7 @@ impl PythonRunner {
         Self {
             python_bin: resolve_python_executable(),
             python_src_dir: resolve_python_src_dir(),
+            extra_env: Vec::new(),
         }
     }
 
@@ -44,7 +48,15 @@ impl PythonRunner {
         Self {
             python_bin: python_bin.into(),
             python_src_dir: resolve_python_src_dir(),
+            extra_env: Vec::new(),
         }
+    }
+
+    /// Adiciona uma variável de ambiente específica para as execuções deste runner.
+    #[must_use]
+    pub fn with_env(mut self, key: impl Into<OsString>, value: impl Into<OsString>) -> Self {
+        self.extra_env.push((key.into(), value.into()));
+        self
     }
 
     /// Retorna o caminho do interpretador Python configurado neste runner.
@@ -58,7 +70,7 @@ impl PythonRunner {
     /// # Errors
     ///
     /// Retorna erro caso o Python não possa ser iniciado, falhe durante a execução
-    /// ou retorne JSON inválido no `stdout`.
+    /// ou retorne JSON inválido/erro estruturado no `stdout`.
     pub fn run_convert(&self, config: &ConvertConfig) -> Result<WorkerResponse> {
         let mut args: Vec<OsString> = vec![
             OsString::from("-m"),
@@ -74,7 +86,7 @@ impl PythonRunner {
             args.push(OsString::from(lang));
         }
 
-        if config.debug {
+        if is_debug_enabled(config.debug) {
             args.push(OsString::from("--debug"));
         }
 
@@ -82,7 +94,7 @@ impl PythonRunner {
             args.push(OsString::from("--overwrite"));
         }
 
-        self.run_args(&args)
+        self.run_args(&args, true)
     }
 
     /// Executa o subcomando `inspect` no worker Python e retorna a resposta validada.
@@ -90,9 +102,9 @@ impl PythonRunner {
     /// # Errors
     ///
     /// Retorna erro caso o Python não possa ser iniciado, falhe durante a execução
-    /// ou retorne JSON inválido no `stdout`.
+    /// ou retorne JSON inválido/erro estruturado no `stdout`.
     pub fn run_inspect(&self, config: &InspectConfig) -> Result<WorkerResponse> {
-        let args: Vec<OsString> = vec![
+        let mut args: Vec<OsString> = vec![
             OsString::from("-m"),
             OsString::from("alq"),
             OsString::from("inspect"),
@@ -100,11 +112,16 @@ impl PythonRunner {
             OsString::from("--json"),
         ];
 
-        self.run_args(&args)
+        if is_debug_enabled(false) {
+            args.push(OsString::from("--debug"));
+        }
+
+        self.run_args(&args, !config.json)
     }
 
-    /// Executa `python <args...>` sem uso de shell e faz o parse do `stdout` como JSON v1.
-    fn run_args(&self, args: &[OsString]) -> Result<WorkerResponse> {
+    /// Executa `python <args...>` sem uso de shell, consome o `stderr` em streaming
+    /// para atualizar progresso/logs e avalia estritamente o Contrato JSON v1 no `stdout`.
+    fn run_args(&self, args: &[OsString], show_progress: bool) -> Result<WorkerResponse> {
         let mut command = Command::new(&self.python_bin);
         command
             .args(args)
@@ -124,36 +141,60 @@ impl PythonRunner {
             command.env("PYTHONPATH", pythonpath);
         }
 
-        let output = command.output().map_err(|err| AlqError::PythonNotFound {
+        for (k, v) in &self.extra_env {
+            command.env(k, v);
+        }
+
+        tracing::debug!(
+            python = %self.python_bin.display(),
+            ?args,
+            "Iniciando subprocesso Python"
+        );
+
+        let mut child = command.spawn().map_err(|err| AlqError::PythonNotFound {
             details: format!("executável '{}': {err}", self.python_bin.display()),
         })?;
 
-        let stdout_str = String::from_utf8_lossy(&output.stdout);
-        let stderr_str = String::from_utf8_lossy(&output.stderr);
+        let child_stdout = child.stdout.take();
+        let child_stderr = child.stderr.take();
 
-        if !output.status.success() {
-            // Se o worker emitiu um erro JSON estruturado no stdout, priorize-o.
-            if let Err(worker_err @ AlqError::WorkerError { .. }) =
-                parse_worker_response(&stdout_str)
-            {
-                return Err(worker_err);
+        let mut reporter = ProgressReporter::new(show_progress);
+
+        let (stdout_str, stderr_lines) = std::thread::scope(|scope| {
+            let stdout_handle = scope.spawn(|| {
+                let mut buf = String::new();
+                if let Some(mut out) = child_stdout {
+                    let _ = out.read_to_string(&mut buf);
+                }
+                buf
+            });
+
+            let mut non_stage_stderr = Vec::new();
+            if let Some(err) = child_stderr {
+                let reader = BufReader::new(err);
+                for line in reader.lines().map_while(std::result::Result::ok) {
+                    let stages_before = reporter.stages().len();
+                    reporter.handle_stderr_line(&line);
+                    if reporter.stages().len() == stages_before && !line.trim().is_empty() {
+                        non_stage_stderr.push(line);
+                    }
+                }
             }
 
-            let status_desc = output.status.code().map_or_else(
-                || "encerrado por sinal".to_string(),
-                |c| format!("código {c}"),
-            );
-            let stderr_trimmed = stderr_str.trim();
-            let details = if stderr_trimmed.is_empty() {
-                format!("processo Python finalizou com {status_desc}")
-            } else {
-                format!("processo Python finalizou com {status_desc}: {stderr_trimmed}")
-            };
+            let stdout_result = stdout_handle.join().unwrap_or_default();
+            (stdout_result, non_stage_stderr)
+        });
 
-            return Err(AlqError::RunnerFailed { details });
-        }
+        let status = child
+            .wait()
+            .map_err(|err| AlqError::PythonExecutionFailed {
+                details: format!("falha ao aguardar término do subprocesso Python: {err}"),
+            })?;
 
-        parse_worker_response(&stdout_str)
+        reporter.finish();
+
+        let stderr_joined = stderr_lines.join("\n");
+        evaluate_worker_output(status.code(), &stdout_str, &stderr_joined)
     }
 }
 

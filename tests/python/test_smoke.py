@@ -1,4 +1,4 @@
-"""Testes smoke e de contrato JSON v1 para o worker Python `alq`."""
+"""Testes smoke para o worker Python `alq`."""
 
 from __future__ import annotations
 
@@ -42,10 +42,12 @@ def test_cli_convert_stub_outputs_valid_json_v1(capsys: pytest.CaptureFixture[st
     assert payload["schema_version"] == SCHEMA_VERSION
     assert payload["status"] == "success"
     assert payload["command"] == "convert"
-    assert payload["input_path"] == "exemplo.pdf"
-    assert payload["output_path"] == "exemplo.epub"
+    assert payload["input"] == "exemplo.pdf"
+    assert payload["output"] == "exemplo.epub"
     assert payload["metadata"]["language"] == "pt-BR"
-    assert "STAGE:convert:100:" in captured.err
+    assert payload["statistics"]["pages"] == 1
+    assert "STAGE:1/2:" in captured.err
+    assert "STAGE:2/2:" in captured.err
 
 
 def test_cli_inspect_stub_outputs_valid_json_v1(capsys: pytest.CaptureFixture[str]) -> None:
@@ -58,7 +60,8 @@ def test_cli_inspect_stub_outputs_valid_json_v1(capsys: pytest.CaptureFixture[st
     assert payload["schema_version"] == SCHEMA_VERSION
     assert payload["status"] == "success"
     assert payload["command"] == "inspect"
-    assert payload["input_path"] == "relatorio.pdf"
+    assert payload["input"] == "relatorio.pdf"
+    assert "output" not in payload
 
 
 def test_build_stub_response_serialization() -> None:
@@ -73,3 +76,4 @@ def test_build_stub_response_serialization() -> None:
     assert parsed["schema_version"] == 1
     assert parsed["status"] == "success"
     assert parsed["metadata"]["language"] == "en"
+    assert parsed["statistics"]["needs_ocr"] is False

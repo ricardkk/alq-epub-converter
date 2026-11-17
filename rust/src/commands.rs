@@ -3,6 +3,7 @@
 use crate::cli::{Cli, Commands, ConvertArgs, InspectArgs};
 use crate::config::{ConvertConfig, InspectConfig};
 use crate::error::{AlqError, Result};
+use crate::progress::init_logging;
 use crate::protocol::WorkerResponse;
 use crate::runner::PythonRunner;
 
@@ -33,15 +34,17 @@ pub fn execute_with_runner(cli: &Cli, runner: &PythonRunner) -> Result<WorkerRes
 /// # Errors
 ///
 /// Retorna erro de validação (`INPUT_NOT_FOUND`, `INVALID_INPUT`, `OUTPUT_EXISTS`)
-/// ou erro de execução do subprocesso Python.
+/// ou erro de execução/protocolo do subprocesso Python.
 pub fn run_convert_command(args: &ConvertArgs, runner: &PythonRunner) -> Result<WorkerResponse> {
+    init_logging(args.debug);
     let config = ConvertConfig::from_args(args)?;
     let response = runner.run_convert(&config)?;
 
+    let fallback_output = config.output.to_string_lossy();
     let out_display = response
-        .output_path
+        .output
         .as_deref()
-        .unwrap_or_else(|| config.output.to_str().unwrap_or(""));
+        .unwrap_or(fallback_output.as_ref());
     println!(
         "Conversão concluída: '{}' -> '{}'",
         config.input.display(),
@@ -56,8 +59,9 @@ pub fn run_convert_command(args: &ConvertArgs, runner: &PythonRunner) -> Result<
 /// # Errors
 ///
 /// Retorna erro de validação (`INPUT_NOT_FOUND`, `INVALID_INPUT`)
-/// ou erro de execução do subprocesso Python.
+/// ou erro de execução/protocolo do subprocesso Python.
 pub fn run_inspect_command(args: &InspectArgs, runner: &PythonRunner) -> Result<WorkerResponse> {
+    init_logging(false);
     let config = InspectConfig::from_args(args)?;
     let response = runner.run_inspect(&config)?;
 
@@ -82,7 +86,22 @@ pub fn run_inspect_command(args: &InspectArgs, runner: &PythonRunner) -> Result<
                 "  Idioma: {}",
                 meta.language.as_deref().unwrap_or("(não detectado)")
             );
-            println!("  Páginas: {}", meta.page_count);
+            println!(
+                "  Identificador: {}",
+                meta.identifier.as_deref().unwrap_or("(não informado)")
+            );
+        }
+        if let Some(stats) = &response.statistics {
+            println!("  Páginas: {}", stats.pages);
+            println!("  Páginas com texto: {}", stats.pages_with_text);
+            println!("  Páginas sem texto: {}", stats.pages_without_text);
+            println!("  Capítulos: {}", stats.chapters);
+            println!("  Parágrafos: {}", stats.paragraphs);
+            println!("  Imagens: {}", stats.images);
+            println!(
+                "  Requer OCR: {}",
+                if stats.needs_ocr { "sim" } else { "não" }
+            );
         }
     }
 

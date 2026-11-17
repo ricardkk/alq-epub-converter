@@ -82,12 +82,22 @@ pub fn validate_input_pdf(input: &Path) -> Result<()> {
     })?;
 
     let mut header = [0_u8; 5];
-    let bytes_read = file.read(&mut header).map_err(|source| AlqError::Io {
-        path: input.to_path_buf(),
-        source,
-    })?;
+    if let Err(source) = file.read_exact(&mut header) {
+        if source.kind() == std::io::ErrorKind::UnexpectedEof {
+            return Err(AlqError::InvalidInput {
+                path: input.to_path_buf(),
+                reason: "o arquivo não possui assinatura mágica PDF válida ('%PDF-').".to_string(),
+                hint: "Verifique se o arquivo é um documento PDF válido e não está vazio ou corrompido."
+                    .to_string(),
+            });
+        }
+        return Err(AlqError::Io {
+            path: input.to_path_buf(),
+            source,
+        });
+    }
 
-    if bytes_read < PDF_MAGIC_HEADER.len() || &header != PDF_MAGIC_HEADER {
+    if &header != PDF_MAGIC_HEADER {
         return Err(AlqError::InvalidInput {
             path: input.to_path_buf(),
             reason: "o arquivo não possui assinatura mágica PDF válida ('%PDF-').".to_string(),
