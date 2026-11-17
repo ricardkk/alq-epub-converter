@@ -1,5 +1,8 @@
 //! Orquestração e execução dos subcomandos da CLI `alq`.
 
+use std::fmt::Write as _;
+use std::path::Path;
+
 use crate::cli::{Cli, Commands, ConvertArgs, InspectArgs};
 use crate::config::{ConvertConfig, InspectConfig};
 use crate::error::{AlqError, Result};
@@ -54,6 +57,80 @@ pub fn run_convert_command(args: &ConvertArgs, runner: &PythonRunner) -> Result<
     Ok(response)
 }
 
+/// Formata o relatório textual legível de `alq inspect` conforme a Seção 8.2 da especificação.
+#[must_use]
+pub fn format_inspect_report(input_path: &Path, response: &WorkerResponse) -> String {
+    let mut out = String::new();
+    let file_display = response
+        .input
+        .as_deref()
+        .filter(|s| !s.trim().is_empty())
+        .map_or_else(|| input_path.display().to_string(), str::to_string);
+
+    let _ = writeln!(out, "Arquivo: {file_display}");
+
+    if let Some(stats) = &response.statistics {
+        let _ = writeln!(
+            out,
+            "Páginas: {} (com texto: {}, sem texto: {})",
+            stats.pages, stats.pages_with_text, stats.pages_without_text
+        );
+    } else {
+        let _ = writeln!(out, "Páginas: não informado");
+    }
+
+    let meta = response.metadata.as_ref();
+    let title = meta
+        .and_then(|m| m.title.as_deref())
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or("não informado");
+    let author = meta
+        .and_then(|m| m.author.as_deref())
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or("não informado");
+    let language = meta
+        .and_then(|m| m.language.as_deref())
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or("não informado");
+    let identifier = meta
+        .and_then(|m| m.identifier.as_deref())
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or("não informado");
+
+    let _ = writeln!(out, "Metadados:");
+    let _ = writeln!(out, "  Título: {title}");
+    let _ = writeln!(out, "  Autor: {author}");
+    let _ = writeln!(out, "  Idioma: {language}");
+    let _ = writeln!(out, "  Identificador: {identifier}");
+
+    if let Some(stats) = &response.statistics {
+        let _ = writeln!(out, "Imagens: {}", stats.images);
+        if let Some(dims) = &stats.page_dimensions {
+            let _ = writeln!(
+                out,
+                "Dimensões da página: {:.2} x {:.2} pt",
+                dims.width, dims.height
+            );
+        } else {
+            let _ = writeln!(out, "Dimensões da página: não informado");
+        }
+        let _ = writeln!(
+            out,
+            "Necessidade provável de OCR: {}",
+            if stats.needs_ocr { "Sim" } else { "Não" }
+        );
+    }
+
+    if !response.warnings.is_empty() {
+        let _ = writeln!(out, "Avisos:");
+        for warning in &response.warnings {
+            let _ = writeln!(out, "  - {warning}");
+        }
+    }
+
+    out
+}
+
 /// Valida os argumentos e executa o fluxo de `alq inspect`.
 ///
 /// # Errors
@@ -72,38 +149,65 @@ pub fn run_inspect_command(args: &InspectArgs, runner: &PythonRunner) -> Result<
             })?;
         println!("{pretty_json}");
     } else {
-        println!("Inspeção do arquivo: '{}'", config.input.display());
-        if let Some(meta) = &response.metadata {
-            println!(
-                "  Título: {}",
-                meta.title.as_deref().unwrap_or("(não informado)")
-            );
-            println!(
-                "  Autor: {}",
-                meta.author.as_deref().unwrap_or("(não informado)")
-            );
-            println!(
-                "  Idioma: {}",
-                meta.language.as_deref().unwrap_or("(não detectado)")
-            );
-            println!(
-                "  Identificador: {}",
-                meta.identifier.as_deref().unwrap_or("(não informado)")
-            );
-        }
-        if let Some(stats) = &response.statistics {
-            println!("  Páginas: {}", stats.pages);
-            println!("  Páginas com texto: {}", stats.pages_with_text);
-            println!("  Páginas sem texto: {}", stats.pages_without_text);
-            println!("  Capítulos: {}", stats.chapters);
-            println!("  Parágrafos: {}", stats.paragraphs);
-            println!("  Imagens: {}", stats.images);
-            println!(
-                "  Requer OCR: {}",
-                if stats.needs_ocr { "sim" } else { "não" }
-            );
-        }
+        print!("{}", format_inspect_report(&config.input, &response));
     }
 
     Ok(response)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::protocol::{
+        DocumentMetadata, DocumentStatistics, PageDimensions, ResponseStatus, SCHEMA_VERSION,
+    };
+
+    #[test]
+    fn format_inspect_report_displays_all_section_8_2_fields() {
+        let response = WorkerResponse {
+            schema_version: SCHEMA_VERSION,
+            status: ResponseStatus::Success,
+            command: Some("inspect".to_string()),
+            input: Some("obra.pdf".to_string()),
+            output: None,
+            metadata: Some(DocumentMetadata {
+                title: None,
+                author: None,
+                language: Some("und".to_string()),
+                identifier: None,
+            }),
+            statistics: Some(DocumentStatistics {
+                pages: 3,
+                pages_with_text: 0,
+                pages_without_text: 3,
+                chapters: 0,
+                paragraphs: 0,
+                images: 3,
+                page_dimensions: Some(PageDimensions {
+                    width: 595.0,
+                    height: 842.0,
+                }),
+                needs_ocr: true,
+            }),
+            warnings: vec![
+                "Nenhum texto extraível encontrado; o documento parece ser escaneado e exigirá OCR."
+                    .to_string(),
+            ],
+            duration_ms: Some(10),
+            error: None,
+        };
+
+        let report = format_inspect_report(Path::new("obra.pdf"), &response);
+        assert!(report.contains("Arquivo: obra.pdf"));
+        assert!(report.contains("Páginas: 3 (com texto: 0, sem texto: 3)"));
+        assert!(report.contains("Título: não informado"));
+        assert!(report.contains("Autor: não informado"));
+        assert!(report.contains("Idioma: und"));
+        assert!(report.contains("Identificador: não informado"));
+        assert!(report.contains("Imagens: 3"));
+        assert!(report.contains("Dimensões da página: 595.00 x 842.00 pt"));
+        assert!(report.contains("Necessidade provável de OCR: Sim"));
+        assert!(report.contains("Avisos:"));
+        assert!(report.contains("exigirá OCR"));
+    }
 }

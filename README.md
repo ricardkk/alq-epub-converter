@@ -57,6 +57,8 @@ alq convert <INPUT> [--output <OUTPUT>] [--language <LANG>] [--debug] [--overwri
 
 ### 2. Inspecionar PDF (`alq inspect`)
 
+Inspeciona o documento PDF via **PyMuPDF** sem modificá-lo, coletando número de páginas (total, com texto e sem texto), metadados (`title`, `author`, `language`, `identifier`), quantidade de imagens incorporadas, dimensões representativas da página, detecção de provável necessidade de OCR e avisos.
+
 ```bash
 alq inspect <INPUT> [--json]
 ```
@@ -64,7 +66,22 @@ alq inspect <INPUT> [--json]
 | Argumento / Flag | Obrigatório | Descrição |
 |---|---|---|
 | `<INPUT>` | Sim | Caminho do arquivo PDF de entrada. |
-| `--json` | Não | Exibe o resultado da inspeção formatado em JSON no `stdout`. |
+| `--json` | Não | Exibe o resultado estruturado da inspeção (Contrato JSON v1) no `stdout`. |
+
+Exemplo de saída textual (`alq inspect livro.pdf`):
+
+```text
+Arquivo: livro.pdf
+Páginas: 120 (com texto: 120, sem texto: 0)
+Metadados:
+  Título: Dom Casmurro
+  Autor: Machado de Assis
+  Idioma: pt-BR
+  Identificador: não informado
+Imagens: 3
+Dimensões da página: 595.00 x 842.00 pt
+Necessidade provável de OCR: Não
+```
 
 ### Variáveis de Ambiente
 
@@ -92,6 +109,8 @@ alq inspect <INPUT> [--json]
 | `PYTHON_NOT_FOUND` | `1` | O interpretador Python não foi encontrado ou não pôde ser executado. |
 | `RUNNER_FAILED` | `1` | O subprocesso Python encerrou com código de erro inesperado. |
 | `PROTOCOL_ERROR` | `1` | A saída em `stdout` do worker Python não é um JSON v1 válido (`schema_version: 1`). |
+| `PDF_OPEN_FAILED` | `1` | O arquivo PDF está corrompido, truncado, vazio ou não pôde ser aberto pelo PyMuPDF. |
+| `PDF_PASSWORD_REQUIRED` | `1` | O arquivo PDF está protegido por senha (`needs_pass`). |
 | `CONVERSION_FAILED` | `1` | O worker Python reportou falha estruturada durante o processamento do documento. |
 | `IO_ERROR` | `1` | Falha de leitura/escrita ou permissão no sistema de arquivos. |
 

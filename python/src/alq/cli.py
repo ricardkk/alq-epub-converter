@@ -10,6 +10,7 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from alq.errors import AlqWorkerError, ErrorCode
+from alq.pdf.reader import inspect_pdf
 from alq.protocol import (
     build_error_response,
     build_error_response_from_exception,
@@ -164,13 +165,10 @@ def _execute_command(parsed: argparse.Namespace) -> int:
         print(response.to_json(), file=sys.stdout, flush=True)
         return 0
 
-    emit_stage(1, 1, "Inspecionando documento PDF (stub)")
-    response = build_stub_response(
-        command="inspect",
-        input_path=str(input_path),
-        output_path=None,
-        language=None,
-    )
+    emit_stage(1, 2, "Abrindo e validando documento PDF")
+    inspection = inspect_pdf(input_path, debug=debug)
+    emit_stage(2, 2, "Inspeção do PDF concluída")
+    response = inspection.to_worker_response(input_display=str(input_path))
     print(response.to_json(), file=sys.stdout, flush=True)
     return 0
 
@@ -183,7 +181,18 @@ def main(argv: Sequence[str] | None = None) -> int:
     if not args_list:
         return 0
 
-    parsed = parser.parse_args(args_list)
+    try:
+        parsed = parser.parse_args(args_list)
+    except SystemExit as exc:
+        if exc.code in (0, None):
+            return 0
+        err_resp = build_error_response(
+            ErrorCode.INVALID_INPUT,
+            f"Argumentos inválidos informados ao worker Python: {' '.join(args_list)}",
+        )
+        print(err_resp.to_json(), file=sys.stdout, flush=True)
+        return 1
+
     debug = is_debug_mode(bool(getattr(parsed, "debug", False)))
 
     try:

@@ -18,10 +18,12 @@ use alq::protocol::{
 };
 use alq::runner::PythonRunner;
 
-/// Cria um arquivo PDF mínimo válido com assinatura mágica `%PDF-`.
+/// Cria um arquivo PDF mínimo válido com 1 página de texto, metadados e tabela `xref` íntegra.
 fn create_valid_pdf(path: &Path) {
+    const MINIMAL_VALID_PDF: &[u8] = b"%PDF-1.7\n%\xc2\xb5\xc2\xb6\n% Written by MuPDF 1.28.6\n\n1 0 obj\n<</Type/Catalog/Pages 2 0 R/Lang(pt-BR)>>\nendobj\n\n2 0 obj\n<</Type/Pages/Count 1/Kids[4 0 R]>>\nendobj\n\n3 0 obj\n<</Font<</F1 5 0 R>>>>\nendobj\n\n4 0 obj\n<</Type/Page/MediaBox[0 0 595 842]/Resources 3 0 R/Parent 2 0 R/Contents 6 0 R>>\nendobj\n\n5 0 obj\n<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>\nendobj\n\n6 0 obj\n<</Length 53>>\nstream\nBT /F1 12 Tf 72 720 Td (Ola Mundo PDF de Teste) Tj ET\nendstream\nendobj\n\n7 0 obj\n<</Title(Documento de Teste)/Author(Autor Teste)>>\nendobj\n\nxref\n0 8\n0000000000 65535 f \n0000000042 00000 n \n0000000100 00000 n \n0000000152 00000 n \n0000000191 00000 n \n0000000288 00000 n \n0000000352 00000 n \n0000000454 00000 n \n\ntrailer\n<</Size 8/Info 7 0 R/Root 1 0 R/ID[<C390C28CC28FC39E527B10C2B17B2823><97EA888DA8C8DE754DB04BD6D799DC89>]>>\nstartxref\n521\n%%EOF\n";
+
     let mut file = File::create(path).expect("deve criar arquivo PDF temporário");
-    file.write_all(b"%PDF-1.7\n1 0 obj\n<< /Type /Catalog >>\nendobj\n%%EOF\n")
+    file.write_all(MINIMAL_VALID_PDF)
         .expect("deve escrever conteúdo PDF mínimo");
 }
 
@@ -575,4 +577,59 @@ fn binary_supports_help_flags_simulated_errors_and_exit_codes() {
     assert_eq!(bad_py_out.status.code(), Some(EXIT_RUNTIME_ERROR));
     let bad_py_stderr = String::from_utf8_lossy(&bad_py_out.stderr);
     assert!(bad_py_stderr.contains("PYTHON_NOT_FOUND"));
+}
+
+#[test]
+fn inspect_real_valid_and_corrupted_pdf_end_to_end() {
+    let bin = env!("CARGO_BIN_EXE_alq");
+    let temp = TempDir::new().expect("criar tempdir");
+
+    // 1. PDF textual válido -> alq inspect (human-readable) retorna código 0 e exibe páginas/metadados/OCR
+    let valid_pdf = temp.path().join("livro_real.pdf");
+    create_valid_pdf(&valid_pdf);
+
+    let inspect_text_out = Command::new(bin)
+        .args(["inspect", valid_pdf.to_str().unwrap()])
+        .output()
+        .expect("executar alq inspect em PDF válido");
+    assert_eq!(inspect_text_out.status.code(), Some(EXIT_SUCCESS));
+    let stdout_text = String::from_utf8_lossy(&inspect_text_out.stdout);
+    assert!(stdout_text.contains("Páginas: 1 (com texto: 1, sem texto: 0)"));
+    assert!(stdout_text.contains("Título: Documento de Teste"));
+    assert!(stdout_text.contains("Autor: Autor Teste"));
+    assert!(stdout_text.contains("Idioma: pt-BR"));
+    assert!(stdout_text.contains("Imagens: 0"));
+    assert!(stdout_text.contains("Dimensões da página: 595.00 x 842.00 pt"));
+    assert!(stdout_text.contains("Necessidade provável de OCR: Não"));
+
+    // 2. PDF textual válido com --json -> retorna JSON estruturado limpo
+    let inspect_json_out = Command::new(bin)
+        .args(["inspect", valid_pdf.to_str().unwrap(), "--json"])
+        .output()
+        .expect("executar alq inspect --json em PDF válido");
+    assert_eq!(inspect_json_out.status.code(), Some(EXIT_SUCCESS));
+    let stdout_json = String::from_utf8_lossy(&inspect_json_out.stdout);
+    let parsed = parse_worker_response(&stdout_json).expect("JSON de inspect deve ser válido");
+    let meta = parsed.metadata.expect("metadados presentes");
+    assert_eq!(meta.title.as_deref(), Some("Documento de Teste"));
+    assert_eq!(meta.author.as_deref(), Some("Autor Teste"));
+    assert_eq!(meta.language.as_deref(), Some("pt-BR"));
+    let stats = parsed.statistics.expect("estatísticas presentes");
+    assert_eq!(stats.pages, 1);
+    assert_eq!(stats.pages_with_text, 1);
+    assert_eq!(stats.pages_without_text, 0);
+    assert_eq!(stats.images, 0);
+    assert!(!stats.needs_ocr);
+
+    // 3. PDF corrompido (com cabeçalho %PDF-1.4 mas estrutura inválida) -> código 1 com PDF_OPEN_FAILED
+    let corrupted_pdf = temp.path().join("corrompido.pdf");
+    std::fs::write(&corrupted_pdf, b"%PDF-1.4\ncorrompido").expect("escrever PDF corrompido");
+
+    let corrupted_out = Command::new(bin)
+        .args(["inspect", corrupted_pdf.to_str().unwrap()])
+        .output()
+        .expect("executar alq inspect em PDF corrompido");
+    assert_eq!(corrupted_out.status.code(), Some(EXIT_RUNTIME_ERROR));
+    let corrupted_stderr = String::from_utf8_lossy(&corrupted_out.stderr);
+    assert!(corrupted_stderr.contains("PDF_OPEN_FAILED"));
 }

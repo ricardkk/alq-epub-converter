@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
+import pymupdf
 import pytest
 
 import alq
@@ -50,9 +52,19 @@ def test_cli_convert_stub_outputs_valid_json_v1(capsys: pytest.CaptureFixture[st
     assert "STAGE:2/2:" in captured.err
 
 
-def test_cli_inspect_stub_outputs_valid_json_v1(capsys: pytest.CaptureFixture[str]) -> None:
+def test_cli_inspect_outputs_valid_json_v1(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     """Verifica que `alq inspect` no worker Python emite Contrato JSON v1 válido no stdout."""
-    exit_code = main(["inspect", "relatorio.pdf", "--json"])
+    pdf_path = tmp_path / "relatorio.pdf"
+    doc = pymupdf.open()
+    page = doc.new_page(width=595, height=842)
+    page.insert_text((72, 72), "Relatório técnico de inspeção.")
+    doc.save(str(pdf_path))
+    doc.close()
+
+    exit_code = main(["inspect", str(pdf_path), "--json"])
     assert exit_code == 0
 
     captured = capsys.readouterr()
@@ -60,7 +72,9 @@ def test_cli_inspect_stub_outputs_valid_json_v1(capsys: pytest.CaptureFixture[st
     assert payload["schema_version"] == SCHEMA_VERSION
     assert payload["status"] == "success"
     assert payload["command"] == "inspect"
-    assert payload["input"] == "relatorio.pdf"
+    assert payload["input"] == str(pdf_path)
+    assert payload["statistics"]["pages"] == 1
+    assert payload["statistics"]["pages_with_text"] == 1
     assert "output" not in payload
 
 

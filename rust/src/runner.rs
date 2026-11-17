@@ -160,13 +160,13 @@ impl PythonRunner {
 
         let mut reporter = ProgressReporter::new(show_progress);
 
-        let (stdout_str, stderr_lines) = std::thread::scope(|scope| {
-            let stdout_handle = scope.spawn(|| {
+        let (stdout_read_result, stderr_lines) = std::thread::scope(|scope| {
+            let stdout_handle = scope.spawn(|| -> std::io::Result<String> {
                 let mut buf = String::new();
                 if let Some(mut out) = child_stdout {
-                    let _ = out.read_to_string(&mut buf);
+                    out.read_to_string(&mut buf)?;
                 }
-                buf
+                Ok(buf)
             });
 
             let mut non_stage_stderr = Vec::new();
@@ -181,7 +181,11 @@ impl PythonRunner {
                 }
             }
 
-            let stdout_result = stdout_handle.join().unwrap_or_default();
+            let stdout_result = stdout_handle.join().unwrap_or_else(|_| {
+                Err(std::io::Error::other(
+                    "thread de leitura do stdout do worker Python encerrou com panic",
+                ))
+            });
             (stdout_result, non_stage_stderr)
         });
 
@@ -192,6 +196,10 @@ impl PythonRunner {
             })?;
 
         reporter.finish();
+
+        let stdout_str = stdout_read_result.map_err(|err| AlqError::ProtocolError {
+            details: format!("falha ao ler stdout do worker Python como UTF-8 válido: {err}"),
+        })?;
 
         let stderr_joined = stderr_lines.join("\n");
         evaluate_worker_output(status.code(), &stdout_str, &stderr_joined)
