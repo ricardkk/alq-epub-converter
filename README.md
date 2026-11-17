@@ -13,8 +13,6 @@ Conversor de arquivos PDF para EPUB baseado em terminal (CLI), construído com a
 ```text
 .
 ├── Cargo.toml                 # Manifesto único Cargo (binário e lib `alq`)
-├── docs/
-│   └── decisions.md           # Decisões arquiteturais e plano técnico
 ├── rust/
 │   └── src/                   # Camada CLI/orquestração em Rust
 ├── python/
@@ -60,5 +58,3 @@ uv --directory python run mypy
 uv --directory python run pytest
 uv --directory python run python -m alq
 ```
-
-Mais detalhes arquiteturais estão documentados em [`docs/decisions.md`](docs/decisions.md).
