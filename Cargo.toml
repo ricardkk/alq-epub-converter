@@ -12,6 +12,10 @@ path = "rust/src/main.rs"
 name = "alq"
 path = "rust/src/lib.rs"
 
+[[test]]
+name = "cli_tests"
+path = "tests/rust/cli_tests.rs"
+
 [dependencies]
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
