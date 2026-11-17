@@ -50,7 +50,7 @@ O projeto adota uma arquitetura de **monólito modular** em um único repositór
 
 ## 4. Integração via Subprocesso e Contrato JSON v1
 
-A comunicação entre o binário Rust e o módulo Python ocorre exclusivamente via subprocesso com separação estrita dos fluxos padrão:
+A comunicação entre o binário Rust e o módulo Python ocorre exclusivamente via subprocesso com separação estrita dos fluxos padrão; o uso de `PyO3` foi descartado na fase inicial em favor do isolamento por subprocesso, evitando acoplamento de runtime e simplificando o ciclo de build e depuração.
 
 - **`stdout` (Contrato JSON v1):**
   - Reservado **exclusivamente** para um único objeto JSON emitido ao final da execução.
@@ -67,9 +67,9 @@ A comunicação entre o binário Rust e o módulo Python ocorre exclusivamente v
 
 Optou-se por um **manifesto `Cargo.toml` único na raiz do repositório**, sem Cargo workspace duplicado:
 - `[[bin]]` com `name = "alq"` apontando para `rust/src/main.rs`.
-- `[lib]` com `name = "alq"` (ou `alq_epub_converter` / `alq_core`, conforme convenção da crate) apontando para `rust/src/lib.rs`.
+- `[lib]` com `name = "alq"` apontando para `rust/src/lib.rs`.
 
-Essa organização mantém a raiz limpa, simplifica o build (`cargo build` / `cargo test` direto na raiz) e isola o código-fonte Rust em `rust/src/` enquanto o código Python reside em `python/` (ou `src/alq/` conforme definição do `pyproject.toml`).
+Essa organização mantém a raiz limpa, simplifica o build (`cargo build` / `cargo test` direto na raiz) e isola o código-fonte Rust em `rust/src/`, enquanto o código Python reside em `python/src/alq/` com manifesto próprio em `python/pyproject.toml`.
 
 ---
 
@@ -126,6 +126,8 @@ Sempre garantir `/home/ricardo/.cargo/bin` no `PATH` quando necessário (`export
 - **Build:** `cargo build` / `cargo build --release`
 
 ### Python (via `uv`)
-- **Lint e formatação:** `uv run ruff check .` e `uv run ruff format --check .`
-- **Checagem de tipos:** `uv run mypy` (apontando para o pacote `alq`)
-- **Testes:** `uv run pytest`
+- **Sincronização do ambiente:** `uv --directory python sync`
+- **Execução do módulo:** `uv --directory python run python -m alq`
+- **Lint e formatação:** `uv --directory python run ruff check .` e `uv --directory python run ruff format --check .`
+- **Checagem de tipos:** `uv --directory python run mypy` (apontando para o pacote `alq`)
+- **Testes:** `uv --directory python run pytest`

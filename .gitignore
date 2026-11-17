@@ -1,0 +1,26 @@
+# Rust
+target/
+
+# Python / uv
+python/.venv/
+.venv/
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+python/dist/
+python/build/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Debug e saídas temporárias
+.debug/
+/output/*
+!/output/.gitkeep
+
+# PDFs e EPUBs temporários na raiz ou em output/ (preservando tests/fixtures/)
+/*.pdf
+/*.epub
+/output/*.pdf
+/output/*.epub
