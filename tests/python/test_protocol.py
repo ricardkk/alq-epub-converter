@@ -1,5 +1,3 @@
-"""Testes do Contrato JSON v1, exceções estruturadas e protocolo no worker Python `alq`."""
-
 from __future__ import annotations
 
 import json
@@ -28,7 +26,6 @@ from alq.protocol import (
 
 
 def test_contract_success_convert_has_all_section_5_fields() -> None:
-    """Garante que o JSON de sucesso de `convert` contém todos os campos exigidos na Seção 5."""
     resp = build_stub_response(
         command="convert",
         input_path="/tmp/entrada.pdf",
@@ -69,7 +66,6 @@ def test_contract_success_convert_has_all_section_5_fields() -> None:
 
 
 def test_contract_success_inspect_omits_output() -> None:
-    """Garante que o JSON de sucesso de `inspect` não inclui o campo `output`."""
     resp = build_stub_response(
         command="inspect",
         input_path="/tmp/inspecao.pdf",
@@ -100,7 +96,6 @@ def test_domain_exceptions_serialize_to_error_contract(
     exc: AlqWorkerError,
     expected_code: str,
 ) -> None:
-    """Verifica que todas as exceções de domínio geram o Contrato JSON v1 de falha."""
     resp = build_error_response_from_exception(exc)
     data = json.loads(resp.to_json())
     assert data["schema_version"] == 1
@@ -111,7 +106,6 @@ def test_domain_exceptions_serialize_to_error_contract(
 
 
 def test_error_response_with_warnings_and_hint() -> None:
-    """Verifica que `warnings` e `hint` são preservados no envelope de erro."""
     resp = build_error_response(
         ErrorCode.NO_EXTRACTABLE_TEXT,
         "Texto ausente.",
@@ -129,7 +123,6 @@ def test_cli_simulate_error_via_flag_and_env(
     capsys: pytest.CaptureFixture[str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Verifica que a CLI Python emite JSON de erro no stdout e retorna código 1."""
     code = main(["convert", "doc.pdf", "--simulate-error", "PDF_OPEN_FAILED"])
     assert code == 1
     captured = capsys.readouterr()
@@ -154,7 +147,6 @@ def test_cli_simulate_error_via_flag_and_env(
 def test_emit_stage_and_debug_write_only_to_stderr(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """Garante que eventos STAGE e logs DEBUG jamais poluem o stdout."""
     emit_stage(2, 6, "Normalizando parágrafos")
     emit_debug("Bloco descartado por ruído", enabled=True)
     emit_debug("Mensagem suprimida", enabled=False)

@@ -1,5 +1,3 @@
-//! Resolução de configurações, validação de caminhos de entrada/saída e regras de segurança.
-
 use std::fs::File;
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -7,47 +5,28 @@ use std::path::{Path, PathBuf};
 use crate::cli::{ConvertArgs, InspectArgs};
 use crate::error::{AlqError, Result};
 
-/// Assinatura mágica exigida no cabeçalho de todo arquivo PDF válido.
 pub const PDF_MAGIC_HEADER: &[u8; 5] = b"%PDF-";
 
-/// Configuração validada pronta para execução do comando `alq convert`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConvertConfig {
-    /// Caminho do arquivo PDF de entrada validado.
     pub input: PathBuf,
-    /// Caminho resolvido para o arquivo EPUB de saída.
     pub output: PathBuf,
-    /// Código de idioma opcional (ex.: `pt-BR`, `en`).
     pub language: Option<String>,
-    /// Se logs de depuração estão habilitados.
     pub debug: bool,
-    /// Se sobrescrita do arquivo de saída existente é permitida.
     pub overwrite: bool,
 }
 
-/// Configuração validada pronta para execução do comando `alq inspect`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InspectConfig {
-    /// Caminho do arquivo PDF de entrada validado.
     pub input: PathBuf,
-    /// Se a saída deve ser impressa como JSON bruto no `stdout`.
     pub json: bool,
 }
 
-/// Resolve o caminho padrão de saída `.epub` no mesmo diretório e com o mesmo nome-base da entrada.
 #[must_use]
 pub fn resolve_default_output_path(input: &Path) -> PathBuf {
     input.with_extension("epub")
 }
 
-/// Valida que o caminho de entrada existe, é um arquivo regular e representa um PDF válido.
-///
-/// # Errors
-///
-/// - [`AlqError::InputNotFound`] se o caminho não existir.
-/// - [`AlqError::InvalidInput`] se for um diretório, não tiver extensão `.pdf` (case-insensitive)
-///   ou não iniciar com a assinatura mágica `%PDF-`.
-/// - [`AlqError::Io`] se ocorrer falha de leitura no sistema de arquivos.
 pub fn validate_input_pdf(input: &Path) -> Result<()> {
     if !input.exists() {
         return Err(AlqError::InputNotFound {
@@ -109,7 +88,6 @@ pub fn validate_input_pdf(input: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Verifica se dois caminhos apontam para o mesmo arquivo (comparação direta ou canônica).
 fn paths_refer_to_same_file(a: &Path, b: &Path) -> bool {
     if a == b {
         return true;
@@ -121,12 +99,6 @@ fn paths_refer_to_same_file(a: &Path, b: &Path) -> bool {
 }
 
 impl ConvertConfig {
-    /// Constrói e valida [`ConvertConfig`] a partir dos argumentos da CLI.
-    ///
-    /// # Errors
-    ///
-    /// Retorna erro se a entrada for inválida/inexistente, se a saída for um diretório
-    /// ou coincidir com a entrada, ou se o arquivo de saída já existir sem `--overwrite`.
     pub fn from_args(args: &ConvertArgs) -> Result<Self> {
         validate_input_pdf(&args.input)?;
 
@@ -178,11 +150,6 @@ impl ConvertConfig {
 }
 
 impl InspectConfig {
-    /// Constrói e valida [`InspectConfig`] a partir dos argumentos da CLI.
-    ///
-    /// # Errors
-    ///
-    /// Retorna erro se o arquivo de entrada não existir ou não for um PDF válido.
     pub fn from_args(args: &InspectArgs) -> Result<Self> {
         validate_input_pdf(&args.input)?;
 

@@ -1,1 +1,1 @@
-"""Construção do sumário (TOC), spine e metadados de navegação EPUB (NCX/Nav)."""
+from __future__ import annotations

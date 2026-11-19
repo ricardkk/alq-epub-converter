@@ -1,1 +1,1 @@
-"""Modelos de domínio intermediários independentes de formato (PDF/EPUB)."""
+from __future__ import annotations

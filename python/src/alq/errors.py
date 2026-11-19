@@ -1,13 +1,9 @@
-"""Hierarquia de exceções estruturadas e códigos de erro do pipeline Python `alq`."""
-
 from __future__ import annotations
 
 from enum import StrEnum
 
 
 class ErrorCode(StrEnum):
-    """Códigos padronizados de erro do domínio `alq` no Contrato JSON v1."""
-
     INPUT_NOT_FOUND = "INPUT_NOT_FOUND"
     INVALID_INPUT = "INVALID_INPUT"
     OUTPUT_EXISTS = "OUTPUT_EXISTS"
@@ -45,13 +41,10 @@ _DEFAULT_MESSAGES: dict[str, str] = {
 
 
 def default_error_message(code: ErrorCode | str) -> str:
-    """Retorna a mensagem descritiva padrão em português para um dado código de erro."""
     return _DEFAULT_MESSAGES.get(str(code), _DEFAULT_MESSAGES[ErrorCode.CONVERSION_FAILED])
 
 
 class AlqWorkerError(Exception):
-    """Exceção base estruturada do worker Python `alq`."""
-
     def __init__(
         self,
         code: ErrorCode | str,
@@ -70,8 +63,6 @@ class AlqWorkerError(Exception):
 
 
 class PdfOpenError(AlqWorkerError):
-    """Erro ao abrir ou analisar a estrutura inicial de um PDF."""
-
     def __init__(
         self,
         message: str | None = None,
@@ -88,8 +79,6 @@ class PdfOpenError(AlqWorkerError):
 
 
 class PdfPasswordRequiredError(AlqWorkerError):
-    """Erro quando o documento PDF exige senha para leitura."""
-
     def __init__(
         self,
         message: str | None = None,
@@ -106,8 +95,6 @@ class PdfPasswordRequiredError(AlqWorkerError):
 
 
 class NoExtractableTextError(AlqWorkerError):
-    """Erro quando nenhuma página do PDF contém texto extraível."""
-
     def __init__(
         self,
         message: str | None = None,
@@ -124,8 +111,6 @@ class NoExtractableTextError(AlqWorkerError):
 
 
 class TextExtractionError(AlqWorkerError):
-    """Erro durante a extração de blocos de texto de uma página do PDF."""
-
     def __init__(
         self,
         message: str | None = None,
@@ -142,8 +127,6 @@ class TextExtractionError(AlqWorkerError):
 
 
 class EpubBuildError(AlqWorkerError):
-    """Erro durante a geração do pacote EPUB."""
-
     def __init__(
         self,
         message: str | None = None,
@@ -160,8 +143,6 @@ class EpubBuildError(AlqWorkerError):
 
 
 class EpubValidationError(AlqWorkerError):
-    """Erro durante a validação estrutural do pacote EPUB."""
-
     def __init__(
         self,
         message: str | None = None,

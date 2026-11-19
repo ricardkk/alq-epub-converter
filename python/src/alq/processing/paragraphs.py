@@ -1,1 +1,1 @@
-"""Reconstrução de parágrafos contínuos, junção de quebras de linha e deshifenização."""
+from __future__ import annotations

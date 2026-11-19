@@ -1,1 +1,1 @@
-"""Representação estrutural do documento completo, páginas e capítulos."""
+from __future__ import annotations

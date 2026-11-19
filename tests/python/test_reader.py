@@ -1,5 +1,3 @@
-"""Testes unitários e de integração da leitura e inspeção de PDF (`alq.pdf.reader`)."""
-
 from __future__ import annotations
 
 import json
@@ -14,7 +12,6 @@ from alq.pdf.reader import inspect_pdf, open_pdf
 
 
 def _make_sample_png_bytes() -> bytes:
-    """Gera os bytes de uma pequena imagem PNG em memória usando PyMuPDF."""
     pix = pymupdf.Pixmap(pymupdf.csRGB, pymupdf.IRect(0, 0, 24, 24), False)
     pix.set_rect(pix.irect, (180, 90, 45))
     return bytes(pix.tobytes("png"))
@@ -24,7 +21,6 @@ def test_inspect_textual_pdf_with_metadata(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """Verifica inspeção de PDF textual com metadados completos e múltiplas páginas."""
     pdf_path = tmp_path / "textual.pdf"
     doc = pymupdf.open()
     for idx in range(1, 4):
@@ -74,7 +70,6 @@ def test_inspect_textual_pdf_with_metadata(
 
 
 def test_inspect_pdf_without_metadata_does_not_invent_fields(tmp_path: Path) -> None:
-    """Confirma que `title` e `author` ausentes ou vazios permanecem `None`."""
     pdf_path = tmp_path / "sem_metadados.pdf"
     doc = pymupdf.open()
     page = doc.new_page(width=612, height=792)
@@ -97,7 +92,6 @@ def test_inspect_pdf_without_metadata_does_not_invent_fields(tmp_path: Path) -> 
 
 
 def test_inspect_scanned_pdf_detects_ocr_need_and_counts_images(tmp_path: Path) -> None:
-    """Verifica detecção de PDF escaneado (sem texto extraível e com imagens incorporadas)."""
     pdf_path = tmp_path / "escaneado.pdf"
     png_bytes = _make_sample_png_bytes()
 
@@ -119,7 +113,6 @@ def test_inspect_scanned_pdf_detects_ocr_need_and_counts_images(tmp_path: Path) 
 
 
 def test_inspect_mixed_pdf_reports_partial_pages_without_text(tmp_path: Path) -> None:
-    """Verifica inspeção de PDF misto (página com texto + páginas sem texto)."""
     pdf_path = tmp_path / "misto.pdf"
     png_bytes = _make_sample_png_bytes()
 
@@ -149,7 +142,6 @@ def test_inspect_password_protected_pdf_raises_password_required(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """Verifica que PDF protegido por senha levanta `PDF_PASSWORD_REQUIRED` na função e na CLI."""
     pdf_path = tmp_path / "protegido.pdf"
     doc = pymupdf.open()
     page = doc.new_page()
@@ -180,7 +172,6 @@ def test_inspect_corrupted_pdf_raises_pdf_open_error_without_stdout_pollution(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """Verifica que PDF corrompido levanta `PDF_OPEN_FAILED` sem poluir `stdout` com erros C."""
     corrupted_path = tmp_path / "corrompido.pdf"
     corrupted_path.write_bytes(b"%PDF-1.4\ncorrompido")
 
@@ -201,7 +192,6 @@ def test_inspect_corrupted_pdf_raises_pdf_open_error_without_stdout_pollution(
 
 
 def test_open_pdf_context_manager_closes_document_even_on_exception(tmp_path: Path) -> None:
-    """Garante que `open_pdf` sempre fecha o `pymupdf.Document` no bloco `finally`."""
     pdf_path = tmp_path / "contexto.pdf"
     doc = pymupdf.open()
     page = doc.new_page()
@@ -223,7 +213,6 @@ def test_open_pdf_context_manager_closes_document_even_on_exception(tmp_path: Pa
 def test_cli_invalid_arguments_emit_structured_invalid_input_json(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """Garante que erro de `argparse` emite JSON `INVALID_INPUT` no stdout e retorna 1."""
     exit_code = main(["inspect", "--flag-inexistente"])
     assert exit_code == 1
     captured = capsys.readouterr()

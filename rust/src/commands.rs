@@ -1,5 +1,3 @@
-//! Orquestração e execução dos subcomandos da CLI `alq`.
-
 use std::fmt::Write as _;
 use std::path::Path;
 
@@ -10,21 +8,11 @@ use crate::progress::init_logging;
 use crate::protocol::WorkerResponse;
 use crate::runner::PythonRunner;
 
-/// Executa o comando selecionado na CLI usando o [`PythonRunner`] padrão.
-///
-/// # Errors
-///
-/// Retorna erro se a validação de caminhos falhar ou se a execução do worker Python falhar.
 pub fn execute(cli: &Cli) -> Result<WorkerResponse> {
     let runner = PythonRunner::new();
     execute_with_runner(cli, &runner)
 }
 
-/// Executa o comando selecionado na CLI utilizando um [`PythonRunner`] específico.
-///
-/// # Errors
-///
-/// Retorna erro se a validação de argumentos/caminhos falhar ou se o worker retornar erro.
 pub fn execute_with_runner(cli: &Cli, runner: &PythonRunner) -> Result<WorkerResponse> {
     match &cli.command {
         Commands::Convert(args) => run_convert_command(args, runner),
@@ -32,12 +20,6 @@ pub fn execute_with_runner(cli: &Cli, runner: &PythonRunner) -> Result<WorkerRes
     }
 }
 
-/// Valida os argumentos e executa o fluxo de `alq convert`.
-///
-/// # Errors
-///
-/// Retorna erro de validação (`INPUT_NOT_FOUND`, `INVALID_INPUT`, `OUTPUT_EXISTS`)
-/// ou erro de execução/protocolo do subprocesso Python.
 pub fn run_convert_command(args: &ConvertArgs, runner: &PythonRunner) -> Result<WorkerResponse> {
     init_logging(args.debug);
     let config = ConvertConfig::from_args(args)?;
@@ -57,7 +39,6 @@ pub fn run_convert_command(args: &ConvertArgs, runner: &PythonRunner) -> Result<
     Ok(response)
 }
 
-/// Formata o relatório textual legível de `alq inspect` conforme a Seção 8.2 da especificação.
 #[must_use]
 pub fn format_inspect_report(input_path: &Path, response: &WorkerResponse) -> String {
     let mut out = String::new();
@@ -131,12 +112,6 @@ pub fn format_inspect_report(input_path: &Path, response: &WorkerResponse) -> St
     out
 }
 
-/// Valida os argumentos e executa o fluxo de `alq inspect`.
-///
-/// # Errors
-///
-/// Retorna erro de validação (`INPUT_NOT_FOUND`, `INVALID_INPUT`)
-/// ou erro de execução/protocolo do subprocesso Python.
 pub fn run_inspect_command(args: &InspectArgs, runner: &PythonRunner) -> Result<WorkerResponse> {
     init_logging(false);
     let config = InspectConfig::from_args(args)?;

@@ -1,1 +1,1 @@
-"""Detecção heurística de títulos, subtítulos e fronteiras de capítulos."""
+from __future__ import annotations

@@ -1,5 +1,3 @@
-"""Ponto de entrada executável para `python -m alq`."""
-
 from __future__ import annotations
 
 import sys

@@ -1,1 +1,1 @@
-"""Normalização Unicode, limpeza de caracteres de controle e padronização tipográfica."""
+from __future__ import annotations

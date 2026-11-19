@@ -1,1 +1,1 @@
-"""Entidades de blocos textuais, títulos, parágrafos, imagens e spans tipográficos."""
+from __future__ import annotations

@@ -1,1 +1,1 @@
-"""Construção do pacote EPUB final, metadados, recursos de imagem e escrita em disco."""
+from __future__ import annotations

@@ -1,5 +1,3 @@
-"""Abertura segura, validação inicial e leitura de metadados e páginas de arquivos PDF."""
-
 from __future__ import annotations
 
 import time
@@ -23,7 +21,6 @@ from alq.protocol import (
 
 
 def configure_mupdf_quiet() -> None:
-    """Silencia saídas diretas em C do MuPDF no `stdout` para preservar o Contrato JSON v1."""
     pymupdf.TOOLS.mupdf_display_errors(False)
     pymupdf.TOOLS.mupdf_display_warnings(False)
 
@@ -32,7 +29,6 @@ configure_mupdf_quiet()
 
 
 def _normalize_optional_str(value: object) -> str | None:
-    """Normaliza um valor textual opcional, convertendo strings vazias ou de espaços para `None`."""
     if not isinstance(value, str):
         return None
     cleaned = value.strip()
@@ -40,7 +36,6 @@ def _normalize_optional_str(value: object) -> str | None:
 
 
 def _extract_language(doc: pymupdf.Document, raw_metadata: dict[str, Any]) -> str:
-    """Extrai o código de idioma dos metadados ou do catálogo PDF, retornando `'und'` se ausente."""
     meta_lang = _normalize_optional_str(raw_metadata.get("language"))
     if meta_lang is not None:
         return meta_lang
@@ -60,7 +55,6 @@ def _extract_language(doc: pymupdf.Document, raw_metadata: dict[str, Any]) -> st
 
 
 def _extract_identifier(raw_metadata: dict[str, Any]) -> str | None:
-    """Extrai um identificador explícito dos metadados do PDF, se disponível."""
     direct_id = _normalize_optional_str(raw_metadata.get("identifier"))
     if direct_id is not None:
         return direct_id
@@ -69,8 +63,6 @@ def _extract_identifier(raw_metadata: dict[str, Any]) -> str | None:
 
 @dataclass(frozen=True, slots=True)
 class PdfInspectionResult:
-    """Resultado estruturado da inspeção técnica de um arquivo PDF."""
-
     path: Path
     pages: int
     pages_with_text: int
@@ -87,7 +79,6 @@ class PdfInspectionResult:
 
     @property
     def metadata(self) -> DocumentMetadataPayload:
-        """Retorna os metadados extraídos no formato do Contrato JSON v1."""
         return DocumentMetadataPayload(
             title=self.title,
             author=self.author,
@@ -97,7 +88,6 @@ class PdfInspectionResult:
 
     @property
     def statistics(self) -> DocumentStatisticsPayload:
-        """Retorna as estatísticas da inspeção no formato do Contrato JSON v1."""
         return DocumentStatisticsPayload(
             pages=self.pages,
             pages_with_text=self.pages_with_text,
@@ -110,7 +100,6 @@ class PdfInspectionResult:
         )
 
     def to_worker_response(self, *, input_display: str | None = None) -> WorkerResponsePayload:
-        """Converte o resultado da inspeção em um `WorkerResponsePayload` do Contrato JSON v1."""
         return WorkerResponsePayload(
             schema_version=SCHEMA_VERSION,
             status="success",
@@ -127,18 +116,6 @@ class PdfInspectionResult:
 
 @contextmanager
 def open_pdf(path: Path | str) -> Iterator[pymupdf.Document]:
-    """Abre um documento PDF de forma segura, garantindo `doc.close()` ao sair do contexto.
-
-    Args:
-        path: Caminho para o arquivo PDF a ser aberto.
-
-    Yields:
-        Instância aberta e validada de `pymupdf.Document`.
-
-    Raises:
-        PdfPasswordRequiredError: Quando o PDF exige senha para leitura (`doc.needs_pass`).
-        PdfOpenError: Quando o arquivo não pode ser aberto, está corrompido, truncado ou vazio.
-    """
     configure_mupdf_quiet()
     pymupdf.TOOLS.reset_mupdf_warnings()
     pdf_path = Path(path)
@@ -198,21 +175,6 @@ def open_pdf(path: Path | str) -> Iterator[pymupdf.Document]:
 
 
 def inspect_pdf(path: Path | str, *, debug: bool = False) -> PdfInspectionResult:
-    """Inspeciona a estrutura, metadados, páginas, imagens e necessidade de OCR de um PDF.
-
-    Não modifica o arquivo original e não carrega pixmaps/bytes de imagens na memória.
-
-    Args:
-        path: Caminho do arquivo PDF a ser inspecionado.
-        debug: Se verdadeiro, emite diagnósticos técnicos e avisos do MuPDF no `stderr`.
-
-    Returns:
-        `PdfInspectionResult` contendo os metadados, estatísticas e avisos coletados.
-
-    Raises:
-        PdfPasswordRequiredError: Se o PDF exigir senha para abertura.
-        PdfOpenError: Se o PDF estiver corrompido, truncado, vazio ou ilegível.
-    """
     start_ns = time.perf_counter_ns()
     pdf_path = Path(path)
 
@@ -286,7 +248,7 @@ def inspect_pdf(path: Path | str, *, debug: bool = False) -> PdfInspectionResult
                     f"{pages_without_text} de {total_pages} página(s) não possuem texto extraível."
                 )
 
-        elapsed_ms = max(0, (time.perf_counter_ns() - start_ns) // 1_000_000)
+        elapsed_ms = max(0, int((time.perf_counter_ns() - start_ns) / 1_000_000))
         resolved_dimensions = first_page_dimensions or PageDimensionsPayload(
             width=595.0, height=842.0
         )

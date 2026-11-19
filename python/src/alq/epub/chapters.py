@@ -1,1 +1,1 @@
-"""Geração de documentos XHTML semânticos para cada capítulo e seção do EPUB."""
+from __future__ import annotations

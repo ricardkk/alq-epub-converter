@@ -1,5 +1,3 @@
-//! Testes de integração da CLI Rust (`alq`), validação de caminhos, contrato JSON v1 e runner Python.
-
 use std::fs::File;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -18,7 +16,6 @@ use alq::protocol::{
 };
 use alq::runner::PythonRunner;
 
-/// Cria um arquivo PDF mínimo válido com 1 página de texto, metadados e tabela `xref` íntegra.
 fn create_valid_pdf(path: &Path) {
     const MINIMAL_VALID_PDF: &[u8] = b"%PDF-1.7\n%\xc2\xb5\xc2\xb6\n% Written by MuPDF 1.28.6\n\n1 0 obj\n<</Type/Catalog/Pages 2 0 R/Lang(pt-BR)>>\nendobj\n\n2 0 obj\n<</Type/Pages/Count 1/Kids[4 0 R]>>\nendobj\n\n3 0 obj\n<</Font<</F1 5 0 R>>>>\nendobj\n\n4 0 obj\n<</Type/Page/MediaBox[0 0 595 842]/Resources 3 0 R/Parent 2 0 R/Contents 6 0 R>>\nendobj\n\n5 0 obj\n<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>\nendobj\n\n6 0 obj\n<</Length 53>>\nstream\nBT /F1 12 Tf 72 720 Td (Ola Mundo PDF de Teste) Tj ET\nendstream\nendobj\n\n7 0 obj\n<</Title(Documento de Teste)/Author(Autor Teste)>>\nendobj\n\nxref\n0 8\n0000000000 65535 f \n0000000042 00000 n \n0000000100 00000 n \n0000000152 00000 n \n0000000191 00000 n \n0000000288 00000 n \n0000000352 00000 n \n0000000454 00000 n \n\ntrailer\n<</Size 8/Info 7 0 R/Root 1 0 R/ID[<C390C28CC28FC39E527B10C2B17B2823><97EA888DA8C8DE754DB04BD6D799DC89>]>>\nstartxref\n521\n%%EOF\n";
 
@@ -160,26 +157,22 @@ fn validation_rejects_directory_as_input_with_invalid_input() {
 fn validation_rejects_non_pdf_files_with_invalid_input() {
     let temp = TempDir::new().expect("criar tempdir");
 
-    // Caso 1: arquivo .txt comum
     let txt_file = temp.path().join("arquivo.txt");
     std::fs::write(&txt_file, b"Conteudo de texto simples").expect("escrever txt");
     let err_txt = validate_input_pdf(&txt_file).expect_err("deve rejeitar .txt");
     assert_eq!(err_txt.code(), "INVALID_INPUT");
 
-    // Caso 2: arquivo .pdf falso (sem assinatura %PDF-)
     let fake_pdf = temp.path().join("falso.pdf");
     std::fs::write(&fake_pdf, b"<html>nao e um pdf</html>").expect("escrever falso pdf");
     let err_fake = validate_input_pdf(&fake_pdf).expect_err("deve rejeitar pdf sem magic bytes");
     assert_eq!(err_fake.code(), "INVALID_INPUT");
     assert_eq!(err_fake.exit_code(), EXIT_VALIDATION_ERROR);
 
-    // Caso 3: arquivo .pdf vazio (UnexpectedEof no read_exact)
     let empty_pdf = temp.path().join("vazio.pdf");
     std::fs::write(&empty_pdf, b"").expect("escrever pdf vazio");
     let err_empty = validate_input_pdf(&empty_pdf).expect_err("deve rejeitar pdf vazio");
     assert_eq!(err_empty.code(), "INVALID_INPUT");
 
-    // Caso 4: arquivo .pdf truncado (< 5 bytes)
     let short_pdf = temp.path().join("curto.pdf");
     std::fs::write(&short_pdf, b"%PDF").expect("escrever pdf curto");
     let err_short =
@@ -350,7 +343,6 @@ fn contract_json_v1_validates_convert_and_inspect_success_payloads() {
 
 #[test]
 fn contract_json_v1_validates_errors_schema_and_status_consistency() {
-    // 1. Falha estruturada PDF_OPEN_FAILED e PDF_PASSWORD_REQUIRED
     for (code, expected_enum) in [
         ("PDF_OPEN_FAILED", ErrorCode::PdfOpenFailed),
         ("PDF_PASSWORD_REQUIRED", ErrorCode::PdfPasswordRequired),
@@ -380,30 +372,25 @@ fn contract_json_v1_validates_errors_schema_and_status_consistency() {
             .contains(&format!("Mensagem de teste para {code}")));
     }
 
-    // 2. schema_version incompatível -> PROTOCOL_ERROR
     let bad_schema = r#"{"schema_version": 2, "status": "success", "warnings": []}"#;
     let err_schema = parse_worker_response(bad_schema).expect_err("deve rejeitar schema_version 2");
     assert_eq!(err_schema.error_code(), ErrorCode::ProtocolError);
 
-    // 3. JSON malformado -> PROTOCOL_ERROR
     let malformed = "{ isto nao e json valido ";
     let err_malformed =
         evaluate_worker_output(Some(0), malformed, "").expect_err("deve rejeitar JSON malformado");
     assert_eq!(err_malformed.error_code(), ErrorCode::ProtocolError);
 
-    // 4. Inconsistência: exit_code != 0 mas status == "success" -> PROTOCOL_ERROR
     let ok_json = r#"{"schema_version": 1, "status": "success", "warnings": []}"#;
     let err_inconsistent_1 = evaluate_worker_output(Some(1), ok_json, "")
         .expect_err("deve rejeitar exit_code 1 com status success");
     assert_eq!(err_inconsistent_1.error_code(), ErrorCode::ProtocolError);
 
-    // 5. Inconsistência: exit_code == 0 mas status == "error" sem payload de erro válido -> PROTOCOL_ERROR
     let err_no_payload = r#"{"schema_version": 1, "status": "error", "warnings": []}"#;
     let err_inconsistent_2 = evaluate_worker_output(Some(0), err_no_payload, "")
         .expect_err("deve rejeitar status error sem payload");
     assert_eq!(err_inconsistent_2.error_code(), ErrorCode::ProtocolError);
 
-    // 6. Processo abortou sem JSON e exit_code != 0 -> PYTHON_EXECUTION_FAILED
     let err_crash = evaluate_worker_output(Some(1), "", "Traceback: erro fatal")
         .expect_err("deve retornar PYTHON_EXECUTION_FAILED");
     assert_eq!(err_crash.error_code(), ErrorCode::PythonExecutionFailed);
@@ -438,7 +425,6 @@ fn runner_invokes_python_stub_and_parses_json_response() {
 
     let runner = PythonRunner::new();
 
-    // Testa convert via runner
     let convert_args = ConvertArgs {
         input: input.clone(),
         output: Some(output.clone()),
@@ -454,7 +440,6 @@ fn runner_invokes_python_stub_and_parses_json_response() {
     assert_eq!(convert_resp.output.as_deref(), output.to_str());
     assert!(convert_resp.statistics.is_some());
 
-    // Testa inspect via runner e run_inspect_command
     let inspect_args = InspectArgs {
         input: input.clone(),
         json: true,
@@ -472,7 +457,6 @@ fn runner_invokes_python_stub_and_parses_json_response() {
         run_inspect_command(&inspect_args, &runner).expect("run_inspect_command deve funcionar");
     assert_eq!(cmd_inspect_resp.schema_version, 1);
 
-    // Testa execute completo de alto nível
     let cli = Cli {
         command: Commands::Inspect(inspect_args),
     };
@@ -494,7 +478,6 @@ fn runner_handles_simulated_worker_error_and_missing_python_binary() {
         overwrite: false,
     };
 
-    // 1. Simulação de erro estruturado no subprocesso Python real (ALQ_SIMULATE_ERROR=PDF_OPEN_FAILED)
     let runner_sim_err = PythonRunner::new().with_env("ALQ_SIMULATE_ERROR", "PDF_OPEN_FAILED");
     let err = run_convert_command(&convert_args, &runner_sim_err)
         .expect_err("deve capturar erro estruturado vindo do Python");
@@ -503,7 +486,6 @@ fn runner_handles_simulated_worker_error_and_missing_python_binary() {
     assert_eq!(err.exit_code(), EXIT_RUNTIME_ERROR);
     assert!(err.to_string().contains("PDF_OPEN_FAILED"));
 
-    // 2. Falha de localização do Python quando executável não existe (PYTHON_NOT_FOUND)
     let runner_missing_py =
         PythonRunner::with_executable("/caminho/inexistente/python_nao_existe_alq");
     let err_missing = run_convert_command(&convert_args, &runner_missing_py)
@@ -531,14 +513,12 @@ fn binary_supports_help_flags_simulated_errors_and_exit_codes() {
         assert!(!stdout.trim().is_empty());
     }
 
-    // Entrada ausente -> código 2 (EXIT_VALIDATION_ERROR)
     let missing_arg_out = Command::new(bin)
         .arg("convert")
         .output()
         .expect("executar alq convert sem argumentos");
     assert_eq!(missing_arg_out.status.code(), Some(EXIT_VALIDATION_ERROR));
 
-    // Arquivo inexistente -> código 2 e mensagem INPUT_NOT_FOUND
     let temp = TempDir::new().expect("criar tempdir");
     let missing_file = temp.path().join("nao_existe.pdf");
     let not_found_out = Command::new(bin)
@@ -549,7 +529,6 @@ fn binary_supports_help_flags_simulated_errors_and_exit_codes() {
     let stderr = String::from_utf8_lossy(&not_found_out.stderr);
     assert!(stderr.contains("INPUT_NOT_FOUND"));
 
-    // Execução ponta a ponta com PDF válido -> código 0
     let valid_pdf = temp.path().join("valido.pdf");
     create_valid_pdf(&valid_pdf);
     let ok_out = Command::new(bin)
@@ -558,7 +537,6 @@ fn binary_supports_help_flags_simulated_errors_and_exit_codes() {
         .expect("executar alq convert com PDF válido");
     assert_eq!(ok_out.status.code(), Some(EXIT_SUCCESS));
 
-    // Execução ponta a ponta com ALQ_SIMULATE_ERROR=PDF_PASSWORD_REQUIRED -> código 1
     let sim_err_out = Command::new(bin)
         .env("ALQ_SIMULATE_ERROR", "PDF_PASSWORD_REQUIRED")
         .args(["inspect", valid_pdf.to_str().unwrap(), "--json"])
@@ -568,7 +546,6 @@ fn binary_supports_help_flags_simulated_errors_and_exit_codes() {
     let sim_stderr = String::from_utf8_lossy(&sim_err_out.stderr);
     assert!(sim_stderr.contains("PDF_PASSWORD_REQUIRED"));
 
-    // Execução ponta a ponta com ALQ_PYTHON=/caminho/inexistente -> código 1 (PYTHON_NOT_FOUND)
     let bad_py_out = Command::new(bin)
         .env("ALQ_PYTHON", "/caminho/inexistente/python_invalido")
         .args(["inspect", valid_pdf.to_str().unwrap()])
@@ -584,7 +561,6 @@ fn inspect_real_valid_and_corrupted_pdf_end_to_end() {
     let bin = env!("CARGO_BIN_EXE_alq");
     let temp = TempDir::new().expect("criar tempdir");
 
-    // 1. PDF textual válido -> alq inspect (human-readable) retorna código 0 e exibe páginas/metadados/OCR
     let valid_pdf = temp.path().join("livro_real.pdf");
     create_valid_pdf(&valid_pdf);
 
@@ -602,7 +578,6 @@ fn inspect_real_valid_and_corrupted_pdf_end_to_end() {
     assert!(stdout_text.contains("Dimensões da página: 595.00 x 842.00 pt"));
     assert!(stdout_text.contains("Necessidade provável de OCR: Não"));
 
-    // 2. PDF textual válido com --json -> retorna JSON estruturado limpo
     let inspect_json_out = Command::new(bin)
         .args(["inspect", valid_pdf.to_str().unwrap(), "--json"])
         .output()
@@ -621,7 +596,6 @@ fn inspect_real_valid_and_corrupted_pdf_end_to_end() {
     assert_eq!(stats.images, 0);
     assert!(!stats.needs_ocr);
 
-    // 3. PDF corrompido (com cabeçalho %PDF-1.4 mas estrutura inválida) -> código 1 com PDF_OPEN_FAILED
     let corrupted_pdf = temp.path().join("corrompido.pdf");
     std::fs::write(&corrupted_pdf, b"%PDF-1.4\ncorrompido").expect("escrever PDF corrompido");
 

@@ -1,1 +1,1 @@
-"""Remoção de ruídos estruturais, como cabeçalhos, rodapés e numeração de página repetitiva."""
+from __future__ import annotations

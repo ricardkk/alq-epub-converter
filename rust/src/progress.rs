@@ -1,37 +1,23 @@
-//! Parsing de eventos `STAGE:<atual>/<total>:<mensagem>`, logging técnico (`tracing_subscriber`)
-//! e renderização de progresso no terminal via `indicatif`.
-
 use indicatif::{ProgressBar, ProgressDrawTarget, ProgressStyle};
 use tracing_subscriber::EnvFilter;
 
-/// Variável de ambiente para habilitar logs de depuração no `alq`.
 pub const ENV_ALQ_DEBUG: &str = "ALQ_DEBUG";
-
-/// Variável de ambiente de fallback para habilitar logs de depuração.
 pub const ENV_PDF2EPUB_DEBUG: &str = "PDF2EPUB_DEBUG";
 
-/// Evento estruturado de progresso emitido pelo worker Python no `stderr`.
-///
-/// Formato esperado: `STAGE:<atual>/<total>:<mensagem>` (ex.: `STAGE:1/6:Inspecionando PDF`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StageEvent {
-    /// Índice da etapa atual (`1..=total`).
     pub current: u64,
-    /// Total de etapas previstas no pipeline.
     pub total: u64,
-    /// Descrição legível da etapa em execução.
     pub message: String,
 }
 
 impl StageEvent {
-    /// Formata a etapa de modo legível (ex.: `[1/6] Inspecionando PDF`).
     #[must_use]
     pub fn format_step(&self) -> String {
         format!("[{}/{}] {}", self.current, self.total, self.message)
     }
 }
 
-/// Verifica se uma string de variável de ambiente representa valor verdadeiro (`1`, `true`, `yes`, `debug`).
 #[must_use]
 pub fn is_truthy_env_value(val: &str) -> bool {
     matches!(
@@ -40,7 +26,6 @@ pub fn is_truthy_env_value(val: &str) -> bool {
     )
 }
 
-/// Determina se o modo de depuração está ativo via flag `--debug` ou variáveis `ALQ_DEBUG` / `PDF2EPUB_DEBUG`.
 #[must_use]
 pub fn is_debug_enabled(cli_debug: bool) -> bool {
     if cli_debug {
@@ -62,10 +47,6 @@ pub fn is_debug_enabled(cli_debug: bool) -> bool {
     false
 }
 
-/// Inicializa o subscriber global `tracing_subscriber` direcionando diagnósticos para o `stderr`.
-///
-/// Se um subscriber global já estiver registrado no processo (ex.: em múltiplos testes),
-/// a chamada é ignorada silenciosamente.
 pub fn init_logging(cli_debug: bool) {
     let default_directive = if is_debug_enabled(cli_debug) {
         "debug"
@@ -84,9 +65,6 @@ pub fn init_logging(cli_debug: bool) {
         .try_init();
 }
 
-/// Analisa uma linha do `stderr` do worker Python e extrai um [`StageEvent`] se possuir o prefixo `STAGE:`.
-///
-/// Suporta o formato canônico `STAGE:<atual>/<total>:<mensagem>`.
 #[must_use]
 pub fn parse_stage_line(line: &str) -> Option<StageEvent> {
     let trimmed = line.trim();
@@ -112,7 +90,6 @@ pub fn parse_stage_line(line: &str) -> Option<StageEvent> {
     })
 }
 
-/// Gerenciador de progresso e consumo de linhas `stderr` do subprocesso Python.
 #[derive(Debug)]
 pub struct ProgressReporter {
     bar: ProgressBar,
@@ -120,10 +97,6 @@ pub struct ProgressReporter {
 }
 
 impl ProgressReporter {
-    /// Cria um novo [`ProgressReporter`].
-    ///
-    /// Quando `show_bar` é `true`, exibe indicador de progresso via `indicatif` no `stderr`.
-    /// Quando `false`, mantém uma barra oculta (`ProgressBar::hidden()`) apenas coletando eventos.
     #[must_use]
     pub fn new(show_bar: bool) -> Self {
         let bar = if show_bar {
@@ -144,10 +117,6 @@ impl ProgressReporter {
         }
     }
 
-    /// Processa uma linha recebida do `stderr` do worker Python.
-    ///
-    /// - Linhas `STAGE:<atual>/<total>:<mensagem>` atualizam a barra `indicatif` e são armazenadas.
-    /// - Demais linhas não vazias são enviadas para `tracing::debug!`.
     pub fn handle_stderr_line(&mut self, line: &str) {
         let trimmed = line.trim();
         if trimmed.is_empty() {
@@ -170,12 +139,10 @@ impl ProgressReporter {
         }
     }
 
-    /// Finaliza e limpa a barra de progresso no terminal.
     pub fn finish(&self) {
         self.bar.finish_and_clear();
     }
 
-    /// Retorna as etapas `STAGE:` registradas até o momento.
     #[must_use]
     pub fn stages(&self) -> &[StageEvent] {
         &self.stages

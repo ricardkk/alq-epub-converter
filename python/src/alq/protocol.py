@@ -1,5 +1,3 @@
-"""Definição e serialização do Contrato JSON v1 (`stdout`) e eventos de progresso (`stderr`)."""
-
 from __future__ import annotations
 
 import json
@@ -14,16 +12,12 @@ SCHEMA_VERSION: int = 1
 
 @dataclass(frozen=True, slots=True)
 class PageDimensionsPayload:
-    """Dimensões representativas das páginas do PDF em pontos tipográficos."""
-
     width: float = 595.0
     height: float = 842.0
 
 
 @dataclass(frozen=True, slots=True)
 class DocumentMetadataPayload:
-    """Metadados básicos do documento no Contrato JSON v1."""
-
     title: str | None = None
     author: str | None = None
     language: str | None = None
@@ -32,8 +26,6 @@ class DocumentMetadataPayload:
 
 @dataclass(frozen=True, slots=True)
 class DocumentStatisticsPayload:
-    """Estatísticas do documento e da execução do pipeline no Contrato JSON v1."""
-
     pages: int = 0
     pages_with_text: int = 0
     pages_without_text: int = 0
@@ -49,8 +41,6 @@ ConversionStatsPayload = DocumentStatisticsPayload
 
 @dataclass(frozen=True, slots=True)
 class ProtocolErrorPayload:
-    """Payload de erro estruturado no Contrato JSON v1."""
-
     code: str
     message: str
     hint: str | None = None
@@ -58,8 +48,6 @@ class ProtocolErrorPayload:
 
 @dataclass(frozen=True, slots=True)
 class WorkerResponsePayload:
-    """Envelope raiz do Contrato JSON v1 emitido no `stdout`."""
-
     schema_version: int = SCHEMA_VERSION
     status: Literal["success", "error"] = "success"
     command: str | None = None
@@ -72,7 +60,6 @@ class WorkerResponsePayload:
     error: ProtocolErrorPayload | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        """Converte o envelope para o dicionário canônico da Seção 5 do Contrato JSON v1."""
         if self.status == "error":
             err_dict: dict[str, Any] = {}
             if self.error is not None:
@@ -105,12 +92,10 @@ class WorkerResponsePayload:
         return data
 
     def to_json(self) -> str:
-        """Serializa a resposta para uma string JSON compacta em linha única."""
         return json.dumps(self.to_dict(), ensure_ascii=False)
 
 
 def emit_stage(current: int, total: int, message: str) -> None:
-    """Emite evento estruturado de etapa (`STAGE:<atual>/<total>:<mensagem>`) no `stderr`."""
     safe_total = max(1, total)
     safe_current = max(1, min(safe_total, current))
     clean_message = message.strip()
@@ -118,7 +103,6 @@ def emit_stage(current: int, total: int, message: str) -> None:
 
 
 def emit_debug(message: str, *, enabled: bool = True) -> None:
-    """Emite mensagem diagnóstica exclusivamente no `stderr` quando `enabled` é verdadeiro."""
     if enabled:
         print(f"DEBUG: {message.strip()}", file=sys.stderr, flush=True)
 
@@ -129,7 +113,6 @@ def build_stub_response(
     output_path: str | None = None,
     language: str | None = None,
 ) -> WorkerResponsePayload:
-    """Constrói uma resposta simulada válida do Contrato JSON v1 para integração Rust-Python."""
     return WorkerResponsePayload(
         schema_version=SCHEMA_VERSION,
         status="success",
@@ -165,7 +148,6 @@ def build_error_response(
     warnings: list[str] | None = None,
     hint: str | None = None,
 ) -> WorkerResponsePayload:
-    """Constrói um envelope de erro estruturado do Contrato JSON v1."""
     return WorkerResponsePayload(
         schema_version=SCHEMA_VERSION,
         status="error",
@@ -179,7 +161,6 @@ def build_error_response(
 
 
 def build_error_response_from_exception(exc: AlqWorkerError) -> WorkerResponsePayload:
-    """Converte uma instância de `AlqWorkerError` em `WorkerResponsePayload`."""
     return build_error_response(
         code=exc.code,
         message=exc.message,

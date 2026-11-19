@@ -1,6 +1,3 @@
-//! Invocação segura do worker Python (`python -m alq`) via `std::process::Command`,
-//! consumo de progresso (`stderr`) e validação estrita do Contrato JSON v1 (`stdout`).
-
 use std::ffi::OsString;
 use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
@@ -11,13 +8,9 @@ use crate::error::{AlqError, Result};
 use crate::progress::{is_debug_enabled, ProgressReporter};
 use crate::protocol::{evaluate_worker_output, WorkerResponse};
 
-/// Nome da variável de ambiente principal para sobrescrever o interpretador Python.
 pub const ENV_ALQ_PYTHON: &str = "ALQ_PYTHON";
-
-/// Nome da variável de ambiente de fallback para compatibilidade com a especificação original.
 pub const ENV_PDF2EPUB_PYTHON: &str = "PDF2EPUB_PYTHON";
 
-/// Executor responsável por invocar o módulo Python `alq` em subprocesso isolado.
 #[derive(Debug, Clone)]
 pub struct PythonRunner {
     python_bin: PathBuf,
@@ -32,7 +25,6 @@ impl Default for PythonRunner {
 }
 
 impl PythonRunner {
-    /// Cria um [`PythonRunner`] resolvendo automaticamente o interpretador Python e o diretório `python/src`.
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -42,7 +34,6 @@ impl PythonRunner {
         }
     }
 
-    /// Cria um [`PythonRunner`] apontando para um executável Python explícito.
     #[must_use]
     pub fn with_executable(python_bin: impl Into<PathBuf>) -> Self {
         Self {
@@ -52,25 +43,17 @@ impl PythonRunner {
         }
     }
 
-    /// Adiciona uma variável de ambiente específica para as execuções deste runner.
     #[must_use]
     pub fn with_env(mut self, key: impl Into<OsString>, value: impl Into<OsString>) -> Self {
         self.extra_env.push((key.into(), value.into()));
         self
     }
 
-    /// Retorna o caminho do interpretador Python configurado neste runner.
     #[must_use]
     pub fn python_bin(&self) -> &Path {
         &self.python_bin
     }
 
-    /// Executa o subcomando `convert` no worker Python e retorna a resposta validada.
-    ///
-    /// # Errors
-    ///
-    /// Retorna erro caso o Python não possa ser iniciado, falhe durante a execução
-    /// ou retorne JSON inválido/erro estruturado no `stdout`.
     pub fn run_convert(&self, config: &ConvertConfig) -> Result<WorkerResponse> {
         let mut args: Vec<OsString> = vec![
             OsString::from("-m"),
@@ -97,12 +80,6 @@ impl PythonRunner {
         self.run_args(&args, true)
     }
 
-    /// Executa o subcomando `inspect` no worker Python e retorna a resposta validada.
-    ///
-    /// # Errors
-    ///
-    /// Retorna erro caso o Python não possa ser iniciado, falhe durante a execução
-    /// ou retorne JSON inválido/erro estruturado no `stdout`.
     pub fn run_inspect(&self, config: &InspectConfig) -> Result<WorkerResponse> {
         let mut args: Vec<OsString> = vec![
             OsString::from("-m"),
@@ -119,8 +96,6 @@ impl PythonRunner {
         self.run_args(&args, !config.json)
     }
 
-    /// Executa `python <args...>` sem uso de shell, consome o `stderr` em streaming
-    /// para atualizar progresso/logs e avalia estritamente o Contrato JSON v1 no `stdout`.
     fn run_args(&self, args: &[OsString], show_progress: bool) -> Result<WorkerResponse> {
         let mut command = Command::new(&self.python_bin);
         command
@@ -206,11 +181,6 @@ impl PythonRunner {
     }
 }
 
-/// Resolve o executável Python seguindo a ordem de prioridade:
-/// 1. Variável de ambiente `ALQ_PYTHON`
-/// 2. Variável de ambiente `PDF2EPUB_PYTHON`
-/// 3. Ambiente virtual local `python/.venv/bin/python` (relativo ao diretório atual ou raiz do repositório)
-/// 4. Fallback para `python3` no `PATH`
 #[must_use]
 pub fn resolve_python_executable() -> PathBuf {
     resolve_python_from_env_and_paths(
@@ -253,7 +223,6 @@ fn resolve_python_src_dir() -> Option<PathBuf> {
     None
 }
 
-/// Função pura auxiliar para testar a resolução de prioridade do executável Python.
 #[must_use]
 pub fn resolve_python_from_env_and_paths(
     alq_python: Option<OsString>,

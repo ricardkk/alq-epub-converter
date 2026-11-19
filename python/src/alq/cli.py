@@ -1,5 +1,3 @@
-"""Interface de linha de comando do worker Python `alq`."""
-
 from __future__ import annotations
 
 import argparse
@@ -30,12 +28,10 @@ def _is_truthy_env(name: str) -> bool:
 
 
 def is_debug_mode(cli_debug: bool = False) -> bool:
-    """Verifica se o modo de depuração está ativo por flag ou variável de ambiente."""
     return cli_debug or _is_truthy_env(ENV_ALQ_DEBUG) or _is_truthy_env(ENV_PDF2EPUB_DEBUG)
 
 
 def build_parser() -> argparse.ArgumentParser:
-    """Constrói o parser de argumentos da CLI interna do worker Python `alq`."""
     parser = argparse.ArgumentParser(
         prog="alq",
         description="Worker Python de conversão e inspeção de PDF para EPUB.",
@@ -174,7 +170,6 @@ def _execute_command(parsed: argparse.Namespace) -> int:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    """Executa o entrypoint da CLI Python do `alq`."""
     args_list = list(sys.argv[1:] if argv is None else argv)
     parser = build_parser()
 
@@ -202,7 +197,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         err_resp = build_error_response_from_exception(exc)
         print(err_resp.to_json(), file=sys.stdout, flush=True)
         return 1
-    except Exception as exc:  # pragma: no cover
+    except Exception as exc:
         if debug:
             traceback.print_exc(file=sys.stderr)
         err_resp = build_error_response(

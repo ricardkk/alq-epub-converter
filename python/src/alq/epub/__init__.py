@@ -1,1 +1,1 @@
-"""Camada de construção, estilização e empacotamento de arquivos EPUB."""
+from __future__ import annotations

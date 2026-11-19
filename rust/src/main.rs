@@ -1,5 +1,3 @@
-//! Ponto de entrada do binário CLI `alq`.
-
 use std::process;
 
 use clap::Parser;

@@ -1,10 +1,7 @@
-//! Definição declarativa dos argumentos, subcomandos e flags da CLI (`clap`).
-
 use std::path::PathBuf;
 
 use clap::{Args, Parser, Subcommand};
 
-/// Interface principal de linha de comando do `alq`.
 #[derive(Debug, Clone, PartialEq, Eq, Parser)]
 #[command(
     name = "alq",
@@ -13,53 +10,55 @@ use clap::{Args, Parser, Subcommand};
     long_about = "Orquestrador CLI em Rust para conversão e inspeção de arquivos PDF rumo ao formato EPUB."
 )]
 pub struct Cli {
-    /// Subcomando a ser executado.
     #[command(subcommand)]
     pub command: Commands,
 }
 
-/// Subcomandos disponíveis na CLI `alq`.
 #[derive(Debug, Clone, PartialEq, Eq, Subcommand)]
 pub enum Commands {
-    /// Converte um arquivo PDF em um pacote EPUB
+    #[command(about = "Converte um arquivo PDF em um pacote EPUB")]
     Convert(ConvertArgs),
-    /// Inspeciona metadados e estrutura básica de um arquivo PDF
+    #[command(about = "Inspeciona metadados e estrutura básica de um arquivo PDF")]
     Inspect(InspectArgs),
 }
 
-/// Argumentos do subcomando `alq convert`.
 #[derive(Debug, Clone, PartialEq, Eq, Args)]
 pub struct ConvertArgs {
-    /// Caminho do arquivo PDF de entrada
-    #[arg(value_name = "INPUT")]
+    #[arg(value_name = "INPUT", help = "Caminho do arquivo PDF de entrada")]
     pub input: PathBuf,
 
-    /// Caminho do arquivo EPUB de saída (padrão: mesmo diretório e nome da entrada com extensão .epub)
-    #[arg(short = 'o', long = "output", value_name = "OUTPUT")]
+    #[arg(
+        short = 'o',
+        long = "output",
+        value_name = "OUTPUT",
+        help = "Caminho do arquivo EPUB de saída (padrão: mesmo diretório e nome da entrada com extensão .epub)"
+    )]
     pub output: Option<PathBuf>,
 
-    /// Código de idioma principal do documento (ex.: pt-BR, en)
-    #[arg(short = 'l', long = "language", value_name = "LANG")]
+    #[arg(
+        short = 'l',
+        long = "language",
+        value_name = "LANG",
+        help = "Código de idioma principal do documento (ex.: pt-BR, en)"
+    )]
     pub language: Option<String>,
 
-    /// Ativa logs técnicos detalhados para depuração
-    #[arg(long = "debug")]
+    #[arg(long = "debug", help = "Ativa logs técnicos detalhados para depuração")]
     pub debug: bool,
 
-    /// Permite sobrescrever o arquivo de saída caso já exista
-    #[arg(long = "overwrite")]
+    #[arg(
+        long = "overwrite",
+        help = "Permite sobrescrever o arquivo de saída caso já exista"
+    )]
     pub overwrite: bool,
 }
 
-/// Argumentos do subcomando `alq inspect`.
 #[derive(Debug, Clone, PartialEq, Eq, Args)]
 pub struct InspectArgs {
-    /// Caminho do arquivo PDF de entrada
-    #[arg(value_name = "INPUT")]
+    #[arg(value_name = "INPUT", help = "Caminho do arquivo PDF de entrada")]
     pub input: PathBuf,
 
-    /// Exibe o resultado da inspeção em formato JSON
-    #[arg(long = "json")]
+    #[arg(long = "json", help = "Exibe o resultado da inspeção em formato JSON")]
     pub json: bool,
 }
 
