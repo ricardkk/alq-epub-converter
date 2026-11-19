@@ -7,7 +7,7 @@ from typing import Any
 
 import pymupdf
 
-from alq.errors import AlqWorkerError, NoExtractableTextError, TextExtractionError
+from alq.errors import NoExtractableTextError, TextExtractionError
 from alq.pdf.layout import order_page_blocks
 from alq.pdf.reader import open_pdf
 from alq.protocol import emit_debug
@@ -477,8 +477,5 @@ def extract_text_blocks(
     order_layout: bool = True,
     debug: bool = False,
 ) -> list[ExtractedBlock]:
-    try:
-        pages = extract_pdf_pages(path, order_layout=order_layout, debug=debug)
-    except AlqWorkerError:
-        raise
+    pages = extract_pdf_pages(path, order_layout=order_layout, debug=debug)
     return [block for page in pages for block in page.blocks]

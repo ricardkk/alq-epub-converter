@@ -9,7 +9,7 @@ if TYPE_CHECKING:
 
 _MAX_COLUMN_WIDTH_RATIO: float = 0.56
 _GUTTER_TOLERANCE_RATIO: float = 0.04
-_MIN_COLUMN_GAP_PT: float = 12.0
+_MAX_COLUMN_OVERLAP_PT: float = 12.0
 
 
 def _resolve_effective_page_width(
@@ -72,7 +72,7 @@ def is_two_column_layout(
 
     max_left_x1 = max(b.bbox.x1 for b in left_blocks)
     min_right_x0 = min(b.bbox.x0 for b in right_blocks)
-    return (min_right_x0 - max_left_x1) >= -_MIN_COLUMN_GAP_PT
+    return (min_right_x0 - max_left_x1) >= -_MAX_COLUMN_OVERLAP_PT
 
 
 def order_page_blocks(
