@@ -2,7 +2,7 @@ use std::fs::File;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
-use crate::cli::{ConvertArgs, InspectArgs};
+use crate::cli::{ConvertArgs, InspectArgs, OcrMode};
 use crate::error::{AlqError, Result};
 
 pub const PDF_MAGIC_HEADER: &[u8; 5] = b"%PDF-";
@@ -14,6 +14,7 @@ pub struct ConvertConfig {
     pub language: Option<String>,
     pub debug: bool,
     pub overwrite: bool,
+    pub ocr: OcrMode,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -145,6 +146,7 @@ impl ConvertConfig {
             language: args.language.clone(),
             debug: args.debug,
             overwrite: args.overwrite,
+            ocr: args.ocr,
         })
     }
 }
@@ -194,6 +196,7 @@ mod tests {
             language: None,
             debug: false,
             overwrite: false,
+            ocr: OcrMode::Never,
         };
 
         let err = ConvertConfig::from_args(&args).unwrap_err();
@@ -209,6 +212,7 @@ mod tests {
             language: None,
             debug: false,
             overwrite: false,
+            ocr: OcrMode::Never,
         };
 
         let err = ConvertConfig::from_args(&args).unwrap_err();
@@ -244,6 +248,7 @@ mod tests {
             language: None,
             debug: false,
             overwrite: false,
+            ocr: OcrMode::Never,
         };
         let err = ConvertConfig::from_args(&args_no_overwrite).unwrap_err();
         assert_eq!(err.code(), "OUTPUT_EXISTS");
@@ -254,6 +259,7 @@ mod tests {
             language: None,
             debug: false,
             overwrite: true,
+            ocr: OcrMode::Never,
         };
         let config = ConvertConfig::from_args(&args_overwrite).expect("deve aceitar com overwrite");
         assert_eq!(config.output, output);

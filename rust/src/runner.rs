@@ -77,6 +77,11 @@ impl PythonRunner {
             args.push(OsString::from("--overwrite"));
         }
 
+        if config.ocr != crate::cli::OcrMode::Never {
+            args.push(OsString::from("--ocr"));
+            args.push(OsString::from(config.ocr.as_str()));
+        }
+
         self.run_args(&args, true)
     }
 

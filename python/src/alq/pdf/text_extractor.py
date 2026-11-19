@@ -426,14 +426,20 @@ def extract_page(
     )
 
 
-def extract_pdf_pages(
+def extract_pdf_pages_with_ocr(
     path: Path | str,
     *,
     order_layout: bool = True,
+    ocr_mode: str = "never",
+    language: str = "und",
     debug: bool = False,
-) -> list[ExtractedPage]:
+) -> tuple[list[ExtractedPage], list[int]]:
+    from alq.pdf.ocr import OcrMode, ocr_pdf_page
+
+    resolved_mode = OcrMode.from_value(ocr_mode)
     pdf_path = Path(path)
     pages: list[ExtractedPage] = []
+    ocr_pages: list[int] = []
     total_blocks = 0
 
     with open_pdf(pdf_path) as doc:
@@ -448,17 +454,37 @@ def extract_pdf_pages(
                     hint="O documento PDF pode estar truncado ou corrompido.",
                 ) from exc
 
-            extracted_page = extract_page(
-                page,
-                page_number=page_number,
-                order_layout=order_layout,
-            )
+            if resolved_mode == OcrMode.ALWAYS:
+                extracted_page = ocr_pdf_page(
+                    page,
+                    page_number=page_number,
+                    language=language,
+                    order_layout=order_layout,
+                    debug=debug,
+                )
+                ocr_pages.append(page_number)
+            else:
+                extracted_page = extract_page(
+                    page,
+                    page_number=page_number,
+                    order_layout=order_layout,
+                )
+                if resolved_mode == OcrMode.AUTO and not extracted_page.blocks:
+                    extracted_page = ocr_pdf_page(
+                        page,
+                        page_number=page_number,
+                        language=language,
+                        order_layout=order_layout,
+                        debug=debug,
+                    )
+                    ocr_pages.append(page_number)
+
             total_blocks += len(extracted_page.blocks)
             pages.append(extracted_page)
 
     emit_debug(
         f"Extração de texto concluída para '{pdf_path}': "
-        f"pages={len(pages)}, total_blocks={total_blocks}",
+        f"pages={len(pages)}, total_blocks={total_blocks}, ocr_pages={ocr_pages}",
         enabled=debug,
     )
 
@@ -468,6 +494,24 @@ def extract_pdf_pages(
             hint="O documento pode ser digitalizado (imagem) e exigir OCR prévio.",
         )
 
+    return (pages, ocr_pages)
+
+
+def extract_pdf_pages(
+    path: Path | str,
+    *,
+    order_layout: bool = True,
+    ocr_mode: str = "never",
+    language: str = "und",
+    debug: bool = False,
+) -> list[ExtractedPage]:
+    pages, _ = extract_pdf_pages_with_ocr(
+        path,
+        order_layout=order_layout,
+        ocr_mode=ocr_mode,
+        language=language,
+        debug=debug,
+    )
     return pages
 
 
@@ -475,7 +519,15 @@ def extract_text_blocks(
     path: Path | str,
     *,
     order_layout: bool = True,
+    ocr_mode: str = "never",
+    language: str = "und",
     debug: bool = False,
 ) -> list[ExtractedBlock]:
-    pages = extract_pdf_pages(path, order_layout=order_layout, debug=debug)
+    pages = extract_pdf_pages(
+        path,
+        order_layout=order_layout,
+        ocr_mode=ocr_mode,
+        language=language,
+        debug=debug,
+    )
     return [block for page in pages for block in page.blocks]

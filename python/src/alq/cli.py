@@ -14,11 +14,13 @@ from alq.epub.builder import build_epub
 from alq.epub.validator import ensure_valid_epub
 from alq.errors import AlqWorkerError, ErrorCode
 from alq.pdf.image_extractor import extract_pdf_images
+from alq.pdf.ocr import OcrMode
 from alq.pdf.reader import inspect_pdf
-from alq.pdf.text_extractor import extract_pdf_pages
+from alq.pdf.text_extractor import extract_pdf_pages_with_ocr
 from alq.pipeline import (
     PipelineArtifacts,
     assemble_chapters,
+    format_ocr_warning,
     interleave_blocks_and_images,
     write_debug_artifacts,
 )
@@ -97,6 +99,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Permite sobrescrever arquivo de saída existente.",
     )
     convert_parser.add_argument(
+        "--ocr",
+        choices=("never", "auto", "always"),
+        default="never",
+        help="Modo de OCR para páginas sem texto extraível (auto, always, never).",
+    )
+    convert_parser.add_argument(
         "--simulate-error",
         dest="sub_simulate_error",
         help=argparse.SUPPRESS,
@@ -171,15 +179,25 @@ def _execute_command(parsed: argparse.Namespace) -> int:
         output_str = getattr(parsed, "output", None) or str(input_path.with_suffix(".epub"))
         output_path = Path(output_str)
         language_override: str | None = getattr(parsed, "language", None)
+        ocr_mode = OcrMode.from_value(getattr(parsed, "ocr", "never"))
         debug_logs: list[str] = []
 
         emit_stage(1, 6, "Analisando PDF...")
         debug_logs.append("STAGE 1/6: Analisando PDF...")
         inspection = inspect_pdf(input_path, debug=debug)
 
+        cleaned_override = language_override.strip() if language_override is not None else ""
+        resolved_language = cleaned_override if cleaned_override else inspection.language
+
         emit_stage(2, 6, "Extraindo conteúdo...")
-        debug_logs.append("STAGE 2/6: Extraindo conteúdo...")
-        extracted_pages = extract_pdf_pages(input_path, order_layout=True, debug=debug)
+        debug_logs.append(f"STAGE 2/6: Extraindo conteúdo (ocr={ocr_mode})...")
+        extracted_pages, ocr_pages = extract_pdf_pages_with_ocr(
+            input_path,
+            order_layout=True,
+            ocr_mode=str(ocr_mode),
+            language=resolved_language,
+            debug=debug,
+        )
 
         emit_stage(3, 6, "Reconstruindo estrutura...")
         debug_logs.append("STAGE 3/6: Reconstruindo estrutura...")
@@ -200,8 +218,11 @@ def _execute_command(parsed: argparse.Namespace) -> int:
         )
         chapters = assemble_chapters(flow_items)
 
-        cleaned_override = language_override.strip() if language_override is not None else ""
-        resolved_language = cleaned_override if cleaned_override else inspection.language
+        combined_warnings = [*inspection.warnings, *image_extraction.warnings]
+        ocr_warn = format_ocr_warning(ocr_pages)
+        if ocr_warn is not None:
+            combined_warnings.append(ocr_warn)
+
         doc_metadata = Metadata(
             title=inspection.title,
             author=inspection.author,
@@ -211,7 +232,7 @@ def _execute_command(parsed: argparse.Namespace) -> int:
         document = Document(
             metadata=doc_metadata,
             chapters=chapters,
-            warnings=[*inspection.warnings, *image_extraction.warnings],
+            warnings=combined_warnings,
             assets=dict(image_extraction.assets),
         )
 

@@ -1,6 +1,25 @@
 use std::path::PathBuf;
 
-use clap::{Args, Parser, Subcommand};
+use clap::{Args, Parser, Subcommand, ValueEnum};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, ValueEnum)]
+pub enum OcrMode {
+    #[default]
+    Never,
+    Auto,
+    Always,
+}
+
+impl OcrMode {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Never => "never",
+            Self::Auto => "auto",
+            Self::Always => "always",
+        }
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Parser)]
 #[command(
@@ -51,6 +70,15 @@ pub struct ConvertArgs {
         help = "Permite sobrescrever o arquivo de saída caso já exista"
     )]
     pub overwrite: bool,
+
+    #[arg(
+        long = "ocr",
+        value_name = "MODE",
+        value_enum,
+        default_value_t = OcrMode::Never,
+        help = "Modo de OCR para páginas sem texto extraível (auto, always, never)"
+    )]
+    pub ocr: OcrMode,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Args)]
@@ -77,6 +105,7 @@ mod tests {
                 language: None,
                 debug: false,
                 overwrite: false,
+                ocr: OcrMode::Never,
             })
         );
     }
@@ -93,6 +122,8 @@ mod tests {
             "pt-BR",
             "--debug",
             "--overwrite",
+            "--ocr",
+            "auto",
         ])
         .expect("deve fazer parse com todas as flags");
 
@@ -104,6 +135,7 @@ mod tests {
                 language: Some("pt-BR".to_string()),
                 debug: true,
                 overwrite: true,
+                ocr: OcrMode::Auto,
             })
         );
     }

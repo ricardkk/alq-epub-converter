@@ -14,6 +14,15 @@ from alq.pdf.layout import (
     order_extracted_pages,
     order_page_blocks,
 )
+from alq.pdf.ocr import (
+    DEFAULT_OCR_DPI,
+    ENV_ALQ_TESSERACT_BIN,
+    OcrMode,
+    build_extracted_page_from_ocr_text,
+    find_tesseract_binary,
+    ocr_pdf_page,
+    resolve_tesseract_language,
+)
 from alq.pdf.reader import (
     PdfInspectionResult,
     configure_mupdf_quiet,
@@ -33,6 +42,7 @@ from alq.pdf.text_extractor import (
     extract_page,
     extract_page_from_dict,
     extract_pdf_pages,
+    extract_pdf_pages_with_ocr,
     extract_text_blocks,
 )
 
@@ -40,6 +50,8 @@ __all__ = [
     "DEFAULT_MIN_IMAGE_AREA",
     "DEFAULT_MIN_IMAGE_HEIGHT",
     "DEFAULT_MIN_IMAGE_WIDTH",
+    "DEFAULT_OCR_DPI",
+    "ENV_ALQ_TESSERACT_BIN",
     "PYMUPDF_BOLD_FLAG",
     "PYMUPDF_ITALIC_FLAG",
     "BoundingBox",
@@ -49,7 +61,9 @@ __all__ = [
     "ExtractedPage",
     "ExtractedSpan",
     "ImageExtractionResult",
+    "OcrMode",
     "PdfInspectionResult",
+    "build_extracted_page_from_ocr_text",
     "configure_mupdf_quiet",
     "detect_is_bold",
     "detect_is_italic",
@@ -57,11 +71,15 @@ __all__ = [
     "extract_page_from_dict",
     "extract_pdf_images",
     "extract_pdf_pages",
+    "extract_pdf_pages_with_ocr",
     "extract_text_blocks",
+    "find_tesseract_binary",
     "inspect_pdf",
     "is_two_column_layout",
     "normalize_image_bytes",
+    "ocr_pdf_page",
     "open_pdf",
     "order_extracted_pages",
     "order_page_blocks",
+    "resolve_tesseract_language",
 ]

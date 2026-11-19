@@ -18,8 +18,9 @@ from alq.pdf.image_extractor import (
     ImageExtractionResult,
     extract_pdf_images,
 )
+from alq.pdf.ocr import OcrMode
 from alq.pdf.reader import PdfInspectionResult, inspect_pdf
-from alq.pdf.text_extractor import ExtractedPage, extract_pdf_pages
+from alq.pdf.text_extractor import ExtractedPage, extract_pdf_pages_with_ocr
 from alq.processing.cleanup import filter_headers_and_footers
 from alq.processing.headings import (
     DEFAULT_MIN_HEADING_CONFIDENCE,
@@ -191,16 +192,37 @@ def build_document_from_pages(
     )
 
 
+def format_ocr_warning(ocr_pages: Sequence[int]) -> str | None:
+    if not ocr_pages:
+        return None
+    pages_display = ", ".join(str(p) for p in ocr_pages)
+    return (
+        f"OCR aplicado na(s) página(s) {pages_display}; "
+        "o reconhecimento óptico pode introduzir imprecisões textuais."
+    )
+
+
 def run_document_pipeline(
     pdf_path: Path | str,
     *,
     language_override: str | None = None,
+    ocr_mode: OcrMode | str = OcrMode.NEVER,
     debug: bool = False,
     min_heading_confidence: float = DEFAULT_MIN_HEADING_CONFIDENCE,
 ) -> PipelineArtifacts:
     path = Path(pdf_path)
     inspection = inspect_pdf(path, debug=debug)
-    extracted_pages = extract_pdf_pages(path, order_layout=True, debug=debug)
+
+    cleaned_override = language_override.strip() if language_override is not None else ""
+    resolved_language = cleaned_override if cleaned_override else inspection.language
+
+    extracted_pages, ocr_pages = extract_pdf_pages_with_ocr(
+        path,
+        order_layout=True,
+        ocr_mode=str(OcrMode.from_value(ocr_mode)),
+        language=resolved_language,
+        debug=debug,
+    )
     cleaned_pages = filter_headers_and_footers(extracted_pages)
     reconstructed_blocks = reconstruct_blocks_from_pages(
         cleaned_pages,
@@ -218,9 +240,6 @@ def run_document_pipeline(
     )
     chapters = assemble_chapters(flow_items)
 
-    cleaned_override = language_override.strip() if language_override is not None else ""
-    resolved_language = cleaned_override if cleaned_override else inspection.language
-
     metadata = Metadata(
         title=inspection.title,
         author=inspection.author,
@@ -229,6 +248,9 @@ def run_document_pipeline(
     )
 
     combined_warnings = [*inspection.warnings, *image_extraction.warnings]
+    ocr_warn = format_ocr_warning(ocr_pages)
+    if ocr_warn is not None:
+        combined_warnings.append(ocr_warn)
 
     document = Document(
         metadata=metadata,
@@ -353,6 +375,7 @@ __all__ = [
     "PipelineArtifacts",
     "assemble_chapters",
     "build_document_from_pages",
+    "format_ocr_warning",
     "interleave_blocks_and_images",
     "run_document_pipeline",
     "write_debug_artifacts",

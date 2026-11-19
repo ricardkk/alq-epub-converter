@@ -6,7 +6,7 @@ use std::process::Command;
 use clap::Parser;
 use tempfile::TempDir;
 
-use alq::cli::{Cli, Commands, ConvertArgs, InspectArgs};
+use alq::cli::{Cli, Commands, ConvertArgs, InspectArgs, OcrMode};
 use alq::commands::{execute, run_convert_command, run_inspect_command};
 use alq::config::{resolve_default_output_path, validate_input_pdf, ConvertConfig, InspectConfig};
 use alq::error::{ErrorCode, EXIT_RUNTIME_ERROR, EXIT_SUCCESS, EXIT_VALIDATION_ERROR};
@@ -36,6 +36,7 @@ fn cli_parsing_convert_default_and_full_options() {
             language: None,
             debug: false,
             overwrite: false,
+            ocr: OcrMode::Never,
         })
     );
 
@@ -49,6 +50,8 @@ fn cli_parsing_convert_default_and_full_options() {
         "pt-BR",
         "--debug",
         "--overwrite",
+        "--ocr",
+        "always",
     ])
     .expect("parse convert completo");
     assert_eq!(
@@ -59,6 +62,7 @@ fn cli_parsing_convert_default_and_full_options() {
             language: Some("pt-BR".to_string()),
             debug: true,
             overwrite: true,
+            ocr: OcrMode::Always,
         })
     );
 }
@@ -113,6 +117,7 @@ fn config_resolves_default_and_custom_output_path() {
         language: None,
         debug: false,
         overwrite: false,
+        ocr: OcrMode::Never,
     };
     let config_default = ConvertConfig::from_args(&args_default).expect("config padrão válida");
     assert_eq!(config_default.output, sub_dir.join("obra.original.epub"));
@@ -124,11 +129,13 @@ fn config_resolves_default_and_custom_output_path() {
         language: Some("en".to_string()),
         debug: true,
         overwrite: false,
+        ocr: OcrMode::Auto,
     };
     let config_custom = ConvertConfig::from_args(&args_custom).expect("config customizada válida");
     assert_eq!(config_custom.output, custom_out);
     assert_eq!(config_custom.language.as_deref(), Some("en"));
     assert!(config_custom.debug);
+    assert_eq!(config_custom.ocr, OcrMode::Auto);
 }
 
 #[test]
@@ -194,6 +201,7 @@ fn validation_protects_existing_output_and_allows_with_overwrite() {
         language: None,
         debug: false,
         overwrite: false,
+        ocr: OcrMode::Never,
     };
     let err = ConvertConfig::from_args(&without_overwrite)
         .expect_err("deve bloquear sobrescrita sem --overwrite");
@@ -208,6 +216,7 @@ fn validation_protects_existing_output_and_allows_with_overwrite() {
         language: None,
         debug: false,
         overwrite: true,
+        ocr: OcrMode::Never,
     };
     let config =
         ConvertConfig::from_args(&with_overwrite).expect("deve permitir quando --overwrite ativo");
@@ -227,6 +236,7 @@ fn validation_rejects_output_equal_to_input_or_directory() {
         language: None,
         debug: false,
         overwrite: true,
+        ocr: OcrMode::Never,
     };
     let err_same =
         ConvertConfig::from_args(&same_output).expect_err("deve rejeitar saída igual à entrada");
@@ -238,6 +248,7 @@ fn validation_rejects_output_equal_to_input_or_directory() {
         language: None,
         debug: false,
         overwrite: true,
+        ocr: OcrMode::Never,
     };
     let err_dir =
         ConvertConfig::from_args(&dir_output).expect_err("deve rejeitar diretório como saída");
@@ -431,6 +442,7 @@ fn runner_invokes_python_stub_and_parses_json_response() {
         language: Some("pt-BR".to_string()),
         debug: true,
         overwrite: false,
+        ocr: OcrMode::Auto,
     };
     let convert_resp =
         run_convert_command(&convert_args, &runner).expect("runner deve executar convert real");
@@ -496,6 +508,7 @@ fn runner_handles_simulated_worker_error_and_missing_python_binary() {
         language: None,
         debug: true,
         overwrite: false,
+        ocr: OcrMode::Never,
     };
 
     let runner_sim_err = PythonRunner::new().with_env("ALQ_SIMULATE_ERROR", "PDF_OPEN_FAILED");
