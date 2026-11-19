@@ -12,9 +12,10 @@ from alq.domain.document import Document
 from alq.domain.metadata import Metadata
 from alq.epub.builder import build_epub
 from alq.errors import AlqWorkerError, ErrorCode
+from alq.pdf.image_extractor import extract_pdf_images
 from alq.pdf.reader import inspect_pdf
 from alq.pdf.text_extractor import extract_pdf_pages
-from alq.pipeline import assemble_chapters
+from alq.pipeline import assemble_chapters, interleave_blocks_and_images
 from alq.processing.cleanup import filter_headers_and_footers
 from alq.processing.headings import classify_headings
 from alq.processing.paragraphs import reconstruct_blocks_from_pages
@@ -179,9 +180,15 @@ def _execute_command(parsed: argparse.Namespace) -> int:
             merge_across_pages=True,
         )
         classified_blocks = classify_headings(reconstructed_blocks)
-        chapters = assemble_chapters(classified_blocks)
 
         emit_stage(4, 6, "Extraindo imagens...")
+        image_extraction = extract_pdf_images(input_path, debug=debug)
+        flow_items = interleave_blocks_and_images(
+            classified_blocks,
+            image_extraction.all_placements,
+        )
+        chapters = assemble_chapters(flow_items)
+
         cleaned_override = language_override.strip() if language_override is not None else ""
         resolved_language = cleaned_override if cleaned_override else inspection.language
         doc_metadata = Metadata(
@@ -193,7 +200,8 @@ def _execute_command(parsed: argparse.Namespace) -> int:
         document = Document(
             metadata=doc_metadata,
             chapters=chapters,
-            warnings=list(inspection.warnings),
+            warnings=[*inspection.warnings, *image_extraction.warnings],
+            assets=dict(image_extraction.assets),
         )
 
         emit_stage(5, 6, "Gerando EPUB...")

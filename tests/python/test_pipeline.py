@@ -253,5 +253,6 @@ def test_run_document_pipeline_end_to_end_on_real_pdf(tmp_path: Path) -> None:
         "cleaned_pages",
         "reconstructed_blocks",
         "classified_blocks",
+        "image_extraction",
         "document",
     }

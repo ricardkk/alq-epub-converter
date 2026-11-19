@@ -1,13 +1,18 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from alq.domain.blocks import Block, Heading, ListBlock, Paragraph
+from alq.domain.blocks import Block, Heading, ImageBlock, ListBlock, Paragraph
 from alq.domain.document import Chapter, Document, ImageAsset
 from alq.domain.metadata import Metadata
+from alq.pdf.image_extractor import (
+    ExtractedImagePlacement,
+    ImageExtractionResult,
+    extract_pdf_images,
+)
 from alq.pdf.reader import PdfInspectionResult, inspect_pdf
 from alq.pdf.text_extractor import ExtractedPage, extract_pdf_pages
 from alq.processing.cleanup import filter_headers_and_footers
@@ -24,6 +29,8 @@ from alq.processing.paragraphs import (
     reconstruct_blocks_from_pages,
 )
 
+FlowItem = ClassifiedBlock | ExtractedImagePlacement
+
 
 @dataclass(frozen=True, slots=True)
 class PipelineArtifacts:
@@ -33,6 +40,7 @@ class PipelineArtifacts:
     reconstructed_blocks: list[ReconstructedCandidateBlock]
     classified_blocks: list[ClassifiedBlock]
     document: Document
+    image_extraction: ImageExtractionResult = field(default_factory=ImageExtractionResult)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -40,27 +48,71 @@ class PipelineArtifacts:
             "cleaned_pages": [page.to_dict() for page in self.cleaned_pages],
             "reconstructed_blocks": [block.to_dict() for block in self.reconstructed_blocks],
             "classified_blocks": [block.to_dict() for block in self.classified_blocks],
+            "image_extraction": self.image_extraction.to_dict(),
             "document": self.document.to_dict(),
         }
 
 
-def _to_domain_block(item: ClassifiedBlock) -> Block:
+def _to_domain_block(item: FlowItem) -> Block:
     if isinstance(item, DetectedHeading):
         return Heading(text=item.text, level=item.level)
     if isinstance(item, ReconstructedList):
         return ListBlock(ordered=item.ordered, items=list(item.items))
     if isinstance(item, ReconstructedParagraph):
         return Paragraph(text=item.text)
+    if isinstance(item, ExtractedImagePlacement):
+        return ImageBlock(asset_id=item.asset_id, alt_text=item.alt_text)
     raise TypeError(f"Unsupported block type: {type(item)!r}")
 
 
-def assemble_chapters(classified_blocks: Sequence[ClassifiedBlock]) -> list[Chapter]:
+def interleave_blocks_and_images(
+    classified_blocks: Sequence[ClassifiedBlock],
+    image_placements: Sequence[ExtractedImagePlacement],
+) -> list[FlowItem]:
+    if not image_placements:
+        return list(classified_blocks)
     if not classified_blocks:
+        return list(image_placements)
+
+    combined: list[tuple[int, int, float, float, int, FlowItem]] = []
+    idx = 0
+    for block in classified_blocks:
+        combined.append(
+            (
+                block.page_number,
+                block.column_index,
+                round(block.bbox.y0, 2),
+                round(block.bbox.x0, 2),
+                idx,
+                block,
+            )
+        )
+        idx += 1
+
+    for placement in image_placements:
+        combined.append(
+            (
+                placement.page_number,
+                placement.column_index,
+                round(placement.bbox.y0, 2),
+                round(placement.bbox.x0, 2),
+                idx,
+                placement,
+            )
+        )
+        idx += 1
+
+    combined.sort(key=lambda entry: (entry[0], entry[1], entry[2], entry[3], entry[4]))
+    return [entry[5] for entry in combined]
+
+
+def assemble_chapters(flow_items: Sequence[FlowItem]) -> list[Chapter]:
+    if not flow_items:
         return [Chapter(title=None, level=1, blocks=[])]
 
-    detected_headings = [b for b in classified_blocks if isinstance(b, DetectedHeading)]
+    detected_headings = [b for b in flow_items if isinstance(b, DetectedHeading)]
     if not detected_headings:
-        domain_blocks = [_to_domain_block(item) for item in classified_blocks]
+        domain_blocks = [_to_domain_block(item) for item in flow_items]
         return [Chapter(title=None, level=1, blocks=domain_blocks)]
 
     chapter_level = min(h.level for h in detected_headings)
@@ -70,7 +122,7 @@ def assemble_chapters(classified_blocks: Sequence[ClassifiedBlock]) -> list[Chap
     current_blocks: list[Block] = []
     has_started_chapter = False
 
-    for item in classified_blocks:
+    for item in flow_items:
         domain_block = _to_domain_block(item)
         if isinstance(item, DetectedHeading) and item.level == chapter_level:
             if has_started_chapter or current_blocks:
@@ -106,6 +158,7 @@ def build_document_from_pages(
     warnings: Sequence[str] = (),
     *,
     assets: Mapping[str, ImageAsset] | None = None,
+    image_placements: Sequence[ExtractedImagePlacement] = (),
     clean_headers_footers: bool = True,
     merge_across_pages: bool = True,
     min_heading_confidence: float = DEFAULT_MIN_HEADING_CONFIDENCE,
@@ -120,7 +173,8 @@ def build_document_from_pages(
         reconstructed,
         min_confidence=min_heading_confidence,
     )
-    chapters = assemble_chapters(classified)
+    flow_items = interleave_blocks_and_images(classified, image_placements)
+    chapters = assemble_chapters(flow_items)
     return Document(
         metadata=metadata,
         chapters=chapters,
@@ -149,7 +203,12 @@ def run_document_pipeline(
         reconstructed_blocks,
         min_confidence=min_heading_confidence,
     )
-    chapters = assemble_chapters(classified_blocks)
+    image_extraction = extract_pdf_images(path, debug=debug)
+    flow_items = interleave_blocks_and_images(
+        classified_blocks,
+        image_extraction.all_placements,
+    )
+    chapters = assemble_chapters(flow_items)
 
     cleaned_override = language_override.strip() if language_override is not None else ""
     resolved_language = cleaned_override if cleaned_override else inspection.language
@@ -161,10 +220,13 @@ def run_document_pipeline(
         identifier=inspection.identifier,
     )
 
+    combined_warnings = [*inspection.warnings, *image_extraction.warnings]
+
     document = Document(
         metadata=metadata,
         chapters=chapters,
-        warnings=list(inspection.warnings),
+        warnings=combined_warnings,
+        assets=dict(image_extraction.assets),
     )
 
     return PipelineArtifacts(
@@ -174,12 +236,15 @@ def run_document_pipeline(
         reconstructed_blocks=reconstructed_blocks,
         classified_blocks=classified_blocks,
         document=document,
+        image_extraction=image_extraction,
     )
 
 
 __all__ = [
+    "FlowItem",
     "PipelineArtifacts",
     "assemble_chapters",
     "build_document_from_pages",
+    "interleave_blocks_and_images",
     "run_document_pipeline",
 ]
