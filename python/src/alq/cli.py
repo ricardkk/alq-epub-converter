@@ -11,6 +11,7 @@ from pathlib import Path
 from alq.domain.document import Document
 from alq.domain.metadata import Metadata
 from alq.epub.builder import build_epub
+from alq.epub.validator import ensure_valid_epub
 from alq.errors import AlqWorkerError, ErrorCode
 from alq.pdf.image_extractor import extract_pdf_images
 from alq.pdf.reader import inspect_pdf
@@ -209,6 +210,7 @@ def _execute_command(parsed: argparse.Namespace) -> int:
         build_epub(document, output_path)
 
         emit_stage(6, 6, "Validando arquivo...")
+        ensure_valid_epub(output_path)
 
         elapsed_ms = max(0, int((time.perf_counter_ns() - start_ns) / 1_000_000))
         response = WorkerResponsePayload(

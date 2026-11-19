@@ -17,11 +17,17 @@ from alq.epub.stylesheet import (
     DEFAULT_STYLESHEET_PATH,
     create_stylesheet_item,
 )
+from alq.epub.validator import (
+    EpubValidationReport,
+    ensure_valid_epub,
+    validate_epub_file,
+)
 
 __all__ = [
     "DEFAULT_CSS",
     "DEFAULT_STYLESHEET_ID",
     "DEFAULT_STYLESHEET_PATH",
+    "EpubValidationReport",
     "build_epub",
     "chapter_filename",
     "chapter_uid",
@@ -29,8 +35,10 @@ __all__ = [
     "configure_navigation",
     "create_chapter_items",
     "create_stylesheet_item",
+    "ensure_valid_epub",
     "render_block_xhtml",
     "render_chapter_body_xhtml",
     "resolve_chapter_title",
     "sanitize_epub_relative_path",
+    "validate_epub_file",
 ]
