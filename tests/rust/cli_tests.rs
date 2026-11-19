@@ -441,6 +441,24 @@ fn runner_invokes_python_stub_and_parses_json_response() {
     assert!(convert_resp.statistics.is_some());
     assert!(output.is_file());
     assert!(std::fs::metadata(&output).expect("metadata epub").len() > 0);
+    let debug_root = temp.path().join(".debug");
+    assert!(debug_root.is_dir());
+    let debug_runs: Vec<_> = std::fs::read_dir(&debug_root)
+        .expect("ler .debug")
+        .filter_map(std::result::Result::ok)
+        .collect();
+    assert_eq!(debug_runs.len(), 1);
+    let run_dir = debug_runs[0].path();
+    for expected_file in [
+        "inspection.json",
+        "extracted.json",
+        "normalized.json",
+        "document.json",
+        "warnings.json",
+        "logs.txt",
+    ] {
+        assert!(run_dir.join(expected_file).is_file());
+    }
 
     let inspect_args = InspectArgs {
         input: input.clone(),
@@ -540,6 +558,7 @@ fn binary_supports_help_flags_simulated_errors_and_exit_codes() {
         .expect("executar alq convert com PDF válido");
     assert_eq!(ok_out.status.code(), Some(EXIT_SUCCESS));
     assert!(expected_epub.is_file());
+    assert!(!temp.path().join(".debug").exists());
     let ok_stdout = String::from_utf8_lossy(&ok_out.stdout);
     assert!(ok_stdout.contains("Conversão concluída."));
     assert!(ok_stdout.contains("Páginas: 1"));

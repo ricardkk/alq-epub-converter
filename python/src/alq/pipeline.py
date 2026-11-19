@@ -1,7 +1,12 @@
 from __future__ import annotations
 
+import json
+import os
+import re
+import uuid
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -28,6 +33,9 @@ from alq.processing.paragraphs import (
     ReconstructedParagraph,
     reconstruct_blocks_from_pages,
 )
+
+ENV_ALQ_DEBUG_DIR: str = "ALQ_DEBUG_DIR"
+_SAFE_STEM_RE = re.compile(r"[^A-Za-z0-9._-]+")
 
 FlowItem = ClassifiedBlock | ExtractedImagePlacement
 
@@ -240,11 +248,112 @@ def run_document_pipeline(
     )
 
 
+def _resolve_debug_base_dir(
+    pdf_path: Path,
+    output_path: Path | None,
+    base_dir: Path | str | None,
+) -> Path:
+    if base_dir is not None:
+        return Path(base_dir)
+    env_dir = os.environ.get(ENV_ALQ_DEBUG_DIR, "").strip()
+    if env_dir:
+        return Path(env_dir)
+    if output_path is not None:
+        return output_path.parent / ".debug"
+    return pdf_path.parent / ".debug"
+
+
+def write_debug_artifacts(
+    artifacts: PipelineArtifacts,
+    pdf_path: Path | str,
+    *,
+    output_path: Path | str | None = None,
+    base_dir: Path | str | None = None,
+    logs: Sequence[str] = (),
+) -> Path:
+    resolved_pdf = Path(pdf_path)
+    resolved_output = Path(output_path) if output_path is not None else None
+    root_debug_dir = _resolve_debug_base_dir(resolved_pdf, resolved_output, base_dir)
+
+    safe_stem = _SAFE_STEM_RE.sub("_", resolved_pdf.stem).strip("._-") or "document"
+    timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+
+    run_dir = root_debug_dir / f"{safe_stem}-{timestamp}-{uuid.uuid4().hex[:6]}"
+    while run_dir.exists():
+        run_dir = root_debug_dir / f"{safe_stem}-{timestamp}-{uuid.uuid4().hex[:6]}"
+
+    run_dir.mkdir(parents=True, exist_ok=False)
+
+    inspection_payload = artifacts.inspection.to_dict()
+    (run_dir / "inspection.json").write_text(
+        json.dumps(inspection_payload, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+    extracted_payload = {
+        "pages": [page.to_dict() for page in artifacts.extracted_pages],
+        "image_extraction": artifacts.image_extraction.to_dict(),
+    }
+    (run_dir / "extracted.json").write_text(
+        json.dumps(extracted_payload, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+    normalized_payload = {
+        "cleaned_pages": [page.to_dict() for page in artifacts.cleaned_pages],
+        "reconstructed_blocks": [block.to_dict() for block in artifacts.reconstructed_blocks],
+        "classified_blocks": [block.to_dict() for block in artifacts.classified_blocks],
+    }
+    (run_dir / "normalized.json").write_text(
+        json.dumps(normalized_payload, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+    document_payload = artifacts.document.to_dict()
+    (run_dir / "document.json").write_text(
+        json.dumps(document_payload, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+    warnings_payload = {
+        "warnings": list(artifacts.document.warnings),
+        "count": len(artifacts.document.warnings),
+    }
+    (run_dir / "warnings.json").write_text(
+        json.dumps(warnings_payload, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+    raw_block_count = sum(len(p.blocks) for p in artifacts.extracted_pages)
+    cleaned_block_count = sum(len(p.blocks) for p in artifacts.cleaned_pages)
+    log_lines: list[str] = [
+        f"timestamp_utc={timestamp}",
+        f"input={resolved_pdf}",
+        f"output={resolved_output if resolved_output is not None else ''}",
+        f"pages={artifacts.inspection.pages}",
+        f"raw_blocks={raw_block_count}",
+        f"cleaned_blocks={cleaned_block_count}",
+        f"reconstructed_blocks={len(artifacts.reconstructed_blocks)}",
+        f"classified_blocks={len(artifacts.classified_blocks)}",
+        f"chapters={len(artifacts.document.chapters)}",
+        f"paragraphs={artifacts.document.paragraph_count}",
+        f"headings={artifacts.document.heading_count}",
+        f"images={artifacts.document.image_count}",
+        f"warnings_count={len(artifacts.document.warnings)}",
+        *[str(line) for line in logs],
+    ]
+    (run_dir / "logs.txt").write_text("\n".join(log_lines) + "\n", encoding="utf-8")
+
+    return run_dir
+
+
 __all__ = [
+    "ENV_ALQ_DEBUG_DIR",
     "FlowItem",
     "PipelineArtifacts",
     "assemble_chapters",
     "build_document_from_pages",
     "interleave_blocks_and_images",
     "run_document_pipeline",
+    "write_debug_artifacts",
 ]

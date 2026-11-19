@@ -113,6 +113,9 @@ class PdfInspectionResult:
             error=None,
         )
 
+    def to_dict(self) -> dict[str, Any]:
+        return self.to_worker_response().to_dict()
+
 
 @contextmanager
 def open_pdf(path: Path | str) -> Iterator[pymupdf.Document]:

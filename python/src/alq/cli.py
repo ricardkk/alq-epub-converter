@@ -16,7 +16,12 @@ from alq.errors import AlqWorkerError, ErrorCode
 from alq.pdf.image_extractor import extract_pdf_images
 from alq.pdf.reader import inspect_pdf
 from alq.pdf.text_extractor import extract_pdf_pages
-from alq.pipeline import assemble_chapters, interleave_blocks_and_images
+from alq.pipeline import (
+    PipelineArtifacts,
+    assemble_chapters,
+    interleave_blocks_and_images,
+    write_debug_artifacts,
+)
 from alq.processing.cleanup import filter_headers_and_footers
 from alq.processing.headings import classify_headings
 from alq.processing.paragraphs import reconstruct_blocks_from_pages
@@ -166,14 +171,18 @@ def _execute_command(parsed: argparse.Namespace) -> int:
         output_str = getattr(parsed, "output", None) or str(input_path.with_suffix(".epub"))
         output_path = Path(output_str)
         language_override: str | None = getattr(parsed, "language", None)
+        debug_logs: list[str] = []
 
         emit_stage(1, 6, "Analisando PDF...")
+        debug_logs.append("STAGE 1/6: Analisando PDF...")
         inspection = inspect_pdf(input_path, debug=debug)
 
         emit_stage(2, 6, "Extraindo conteúdo...")
+        debug_logs.append("STAGE 2/6: Extraindo conteúdo...")
         extracted_pages = extract_pdf_pages(input_path, order_layout=True, debug=debug)
 
         emit_stage(3, 6, "Reconstruindo estrutura...")
+        debug_logs.append("STAGE 3/6: Reconstruindo estrutura...")
         cleaned_pages = filter_headers_and_footers(extracted_pages)
         reconstructed_blocks = reconstruct_blocks_from_pages(
             cleaned_pages,
@@ -183,6 +192,7 @@ def _execute_command(parsed: argparse.Namespace) -> int:
         classified_blocks = classify_headings(reconstructed_blocks)
 
         emit_stage(4, 6, "Extraindo imagens...")
+        debug_logs.append("STAGE 4/6: Extraindo imagens...")
         image_extraction = extract_pdf_images(input_path, debug=debug)
         flow_items = interleave_blocks_and_images(
             classified_blocks,
@@ -205,12 +215,34 @@ def _execute_command(parsed: argparse.Namespace) -> int:
             assets=dict(image_extraction.assets),
         )
 
+        artifacts = PipelineArtifacts(
+            inspection=inspection,
+            extracted_pages=extracted_pages,
+            cleaned_pages=cleaned_pages,
+            reconstructed_blocks=reconstructed_blocks,
+            classified_blocks=classified_blocks,
+            document=document,
+            image_extraction=image_extraction,
+        )
+
         emit_stage(5, 6, "Gerando EPUB...")
+        debug_logs.append(f"STAGE 5/6: Gerando EPUB em '{output_str}'...")
         emit_debug(f"Saída resolvida para '{output_str}'", enabled=debug)
         build_epub(document, output_path)
 
         emit_stage(6, 6, "Validando arquivo...")
+        debug_logs.append("STAGE 6/6: Validando arquivo EPUB...")
         ensure_valid_epub(output_path)
+        debug_logs.append("Conversão e validação concluídas com sucesso.")
+
+        if debug:
+            debug_dir = write_debug_artifacts(
+                artifacts,
+                input_path,
+                output_path=output_path,
+                logs=debug_logs,
+            )
+            emit_debug(f"Artefatos de diagnóstico gravados em '{debug_dir}'", enabled=debug)
 
         elapsed_ms = max(0, int((time.perf_counter_ns() - start_ns) / 1_000_000))
         response = WorkerResponsePayload(
