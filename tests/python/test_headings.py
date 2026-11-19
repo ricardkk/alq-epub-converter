@@ -221,3 +221,97 @@ def test_document_without_reliable_headings_does_not_invent_titles(tmp_path: Pat
     assert len(classified) == 2
     assert all(isinstance(b, ReconstructedParagraph) for b in classified)
     assert detect_headings(reconstructed) == []
+
+
+def _make_column_block(
+    text: str,
+    x0: float,
+    x1: float,
+    y0: float,
+    *,
+    line_count: int = 1,
+    font_size: float = 9.5,
+    page_number: int = 1,
+) -> ReconstructedParagraph:
+    return ReconstructedParagraph(
+        text=text,
+        page_number=page_number,
+        bbox=BoundingBox(x0, y0, x1, y0 + 12.8 * line_count),
+        font_size=font_size,
+        font_name="MinionPro-Regular",
+        is_bold=False,
+        is_italic=False,
+        line_count=line_count,
+    )
+
+
+def _body_text(seed: str) -> str:
+    return (
+        f"{seed} é um parágrafo longo do corpo do texto que ocupa toda a largura "
+        "da coluna e serve para estabelecer a mediana tipográfica do documento."
+    )
+
+
+def test_centered_uppercase_title_split_across_lines_followed_by_date_is_level_one() -> None:
+    blocks = [
+        _make_column_block(_body_text("Antes"), 36.0, 250.0, 40.0, line_count=12),
+        _make_column_block("SOBRE A FRENTE ÚNICA INTERNACIONAL", 50.0, 236.0, 200.0),
+        _make_column_block("ANTIFASCISTA*", 108.0, 178.0, 212.0),
+        _make_column_block("(23 de Junho de 1941)", 100.0, 186.0, 235.0),
+        _make_column_block(_body_text("Depois"), 36.0, 250.0, 260.0, line_count=10),
+    ]
+
+    classified = classify_headings(blocks)
+    headings = [item for item in classified if isinstance(item, DetectedHeading)]
+
+    assert len(classified) == 4
+    assert len(headings) == 1
+    assert headings[0].text == "SOBRE A FRENTE ÚNICA INTERNACIONAL ANTIFASCISTA*"
+    assert headings[0].level == 1
+    assert headings[0].confidence >= DEFAULT_MIN_HEADING_CONFIDENCE
+
+
+def test_centered_uppercase_subtitle_without_date_is_level_two() -> None:
+    blocks = [
+        _make_column_block(_body_text("Antes"), 36.0, 250.0, 40.0, line_count=12),
+        _make_column_block("A GUERRA POPULAR", 95.0, 191.0, 200.0, font_size=9.0),
+        _make_column_block(_body_text("Depois"), 36.0, 250.0, 230.0, line_count=10),
+    ]
+
+    headings = detect_headings(blocks)
+
+    assert [(h.text, h.level) for h in headings] == [("A GUERRA POPULAR", 2)]
+
+
+def test_uppercase_text_that_is_not_centered_is_not_promoted() -> None:
+    blocks = [
+        _make_column_block(_body_text("Antes"), 36.0, 250.0, 40.0, line_count=12),
+        _make_column_block("SIGLA ALINHADA À ESQUERDA", 36.0, 160.0, 200.0),
+        _make_column_block(_body_text("Depois"), 36.0, 250.0, 230.0, line_count=10),
+    ]
+
+    assert detect_headings(blocks) == []
+
+
+def test_centered_single_item_uppercase_list_becomes_subtitle_with_marker() -> None:
+    blocks: list[ReconstructedCandidateBlock] = [
+        _make_column_block(_body_text("Antes"), 36.0, 250.0, 40.0, line_count=12),
+        ReconstructedList(
+            ordered=True,
+            items=["AS REIVINDICAÇÕES FUNDAMENTAIS DO POVO"],
+            page_number=1,
+            bbox=BoundingBox(45.0, 200.0, 241.0, 224.0),
+            font_size=9.5,
+            font_name="MinionPro-Regular",
+            is_bold=False,
+            is_italic=False,
+            markers=["I."],
+        ),
+        _make_column_block(_body_text("Depois"), 36.0, 250.0, 230.0, line_count=10),
+    ]
+
+    headings = detect_headings(blocks)
+
+    assert [(h.text, h.level) for h in headings] == [
+        ("I. AS REIVINDICAÇÕES FUNDAMENTAIS DO POVO", 2)
+    ]

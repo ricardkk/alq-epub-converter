@@ -256,3 +256,22 @@ def test_run_document_pipeline_end_to_end_on_real_pdf(tmp_path: Path) -> None:
         "image_extraction",
         "document",
     }
+
+
+def test_assemble_chapters_absorbs_consecutive_titles_on_same_page() -> None:
+    classified: list[ClassifiedBlock] = [
+        _make_detected_heading("OBRAS ESCOLHIDAS DE", level=1, page_number=1),
+        _make_detected_heading("MAO TSETUNG", level=1, page_number=1),
+        _make_reconstructed_para("Tomo III", page_number=1),
+        _make_detected_heading("PREFÁCIO", level=1, page_number=2),
+        _make_reconstructed_para("Texto do prefácio.", page_number=2),
+    ]
+
+    chapters = assemble_chapters(classified)
+
+    assert [chapter.title for chapter in chapters] == ["OBRAS ESCOLHIDAS DE", "PREFÁCIO"]
+    assert chapters[0].blocks == [
+        Heading("OBRAS ESCOLHIDAS DE", level=1),
+        Heading("MAO TSETUNG", level=1),
+        Paragraph("Tomo III"),
+    ]

@@ -129,11 +129,16 @@ def assemble_chapters(flow_items: Sequence[FlowItem]) -> list[Chapter]:
     current_title: str | None = None
     current_level: int = 1
     current_blocks: list[Block] = []
+    current_page: int | None = None
+    current_has_body = False
     has_started_chapter = False
 
     for item in flow_items:
         domain_block = _to_domain_block(item)
         if isinstance(item, DetectedHeading) and item.level == chapter_level:
+            if has_started_chapter and not current_has_body and item.page_number == current_page:
+                current_blocks.append(domain_block)
+                continue
             if has_started_chapter or current_blocks:
                 chapters.append(
                     Chapter(
@@ -145,9 +150,13 @@ def assemble_chapters(flow_items: Sequence[FlowItem]) -> list[Chapter]:
             current_title = item.text
             current_level = item.level
             current_blocks = [domain_block]
+            current_page = item.page_number
+            current_has_body = False
             has_started_chapter = True
         else:
             current_blocks.append(domain_block)
+            if not isinstance(item, DetectedHeading):
+                current_has_body = True
 
     if has_started_chapter or current_blocks:
         chapters.append(
