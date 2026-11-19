@@ -42,3 +42,7 @@ files = ["src/alq", "../tests/python"]
 strict = true
 disallow_untyped_calls = false
 warn_unused_configs = true
+
+[[tool.mypy.overrides]]
+module = ["ebooklib", "ebooklib.*"]
+ignore_missing_imports = true

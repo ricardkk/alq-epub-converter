@@ -433,12 +433,14 @@ fn runner_invokes_python_stub_and_parses_json_response() {
         overwrite: false,
     };
     let convert_resp =
-        run_convert_command(&convert_args, &runner).expect("runner deve executar convert stub");
+        run_convert_command(&convert_args, &runner).expect("runner deve executar convert real");
     assert_eq!(convert_resp.schema_version, 1);
     assert_eq!(convert_resp.status, ResponseStatus::Success);
     assert_eq!(convert_resp.command.as_deref(), Some("convert"));
     assert_eq!(convert_resp.output.as_deref(), output.to_str());
     assert!(convert_resp.statistics.is_some());
+    assert!(output.is_file());
+    assert!(std::fs::metadata(&output).expect("metadata epub").len() > 0);
 
     let inspect_args = InspectArgs {
         input: input.clone(),
@@ -530,12 +532,19 @@ fn binary_supports_help_flags_simulated_errors_and_exit_codes() {
     assert!(stderr.contains("INPUT_NOT_FOUND"));
 
     let valid_pdf = temp.path().join("valido.pdf");
+    let expected_epub = temp.path().join("valido.epub");
     create_valid_pdf(&valid_pdf);
     let ok_out = Command::new(bin)
         .args(["convert", valid_pdf.to_str().unwrap()])
         .output()
         .expect("executar alq convert com PDF válido");
     assert_eq!(ok_out.status.code(), Some(EXIT_SUCCESS));
+    assert!(expected_epub.is_file());
+    let ok_stdout = String::from_utf8_lossy(&ok_out.stdout);
+    assert!(ok_stdout.contains("Conversão concluída."));
+    assert!(ok_stdout.contains("Páginas: 1"));
+    assert!(ok_stdout.contains("Capítulos: 1"));
+    assert!(ok_stdout.contains("Parágrafos: 1"));
 
     let sim_err_out = Command::new(bin)
         .env("ALQ_SIMULATE_ERROR", "PDF_PASSWORD_REQUIRED")

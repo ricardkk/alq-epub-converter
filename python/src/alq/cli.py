@@ -3,16 +3,28 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+import time
 import traceback
 from collections.abc import Sequence
 from pathlib import Path
 
+from alq.domain.document import Document
+from alq.domain.metadata import Metadata
+from alq.epub.builder import build_epub
 from alq.errors import AlqWorkerError, ErrorCode
 from alq.pdf.reader import inspect_pdf
+from alq.pdf.text_extractor import extract_pdf_pages
+from alq.pipeline import assemble_chapters
+from alq.processing.cleanup import filter_headers_and_footers
+from alq.processing.headings import classify_headings
+from alq.processing.paragraphs import reconstruct_blocks_from_pages
 from alq.protocol import (
+    SCHEMA_VERSION,
+    DocumentMetadataPayload,
+    DocumentStatisticsPayload,
+    WorkerResponsePayload,
     build_error_response,
     build_error_response_from_exception,
-    build_stub_response,
     emit_debug,
     emit_stage,
 )
@@ -144,19 +156,78 @@ def _execute_command(parsed: argparse.Namespace) -> int:
 
     simulated_code = _resolve_simulated_error(parsed)
     if simulated_code is not None:
-        emit_stage(1, 2, "Iniciando leitura do documento PDF")
+        emit_stage(1, 6, "Analisando PDF...")
         raise AlqWorkerError(simulated_code)
 
     if command == "convert":
+        start_ns = time.perf_counter_ns()
         output_str = getattr(parsed, "output", None) or str(input_path.with_suffix(".epub"))
-        emit_stage(1, 2, "Inspecionando documento PDF")
-        emit_stage(2, 2, "Gerando pacote EPUB (stub)")
+        output_path = Path(output_str)
+        language_override: str | None = getattr(parsed, "language", None)
+
+        emit_stage(1, 6, "Analisando PDF...")
+        inspection = inspect_pdf(input_path, debug=debug)
+
+        emit_stage(2, 6, "Extraindo conteúdo...")
+        extracted_pages = extract_pdf_pages(input_path, order_layout=True, debug=debug)
+
+        emit_stage(3, 6, "Reconstruindo estrutura...")
+        cleaned_pages = filter_headers_and_footers(extracted_pages)
+        reconstructed_blocks = reconstruct_blocks_from_pages(
+            cleaned_pages,
+            clean_headers_footers=False,
+            merge_across_pages=True,
+        )
+        classified_blocks = classify_headings(reconstructed_blocks)
+        chapters = assemble_chapters(classified_blocks)
+
+        emit_stage(4, 6, "Extraindo imagens...")
+        cleaned_override = language_override.strip() if language_override is not None else ""
+        resolved_language = cleaned_override if cleaned_override else inspection.language
+        doc_metadata = Metadata(
+            title=inspection.title,
+            author=inspection.author,
+            language=resolved_language,
+            identifier=inspection.identifier,
+        )
+        document = Document(
+            metadata=doc_metadata,
+            chapters=chapters,
+            warnings=list(inspection.warnings),
+        )
+
+        emit_stage(5, 6, "Gerando EPUB...")
         emit_debug(f"Saída resolvida para '{output_str}'", enabled=debug)
-        response = build_stub_response(
+        build_epub(document, output_path)
+
+        emit_stage(6, 6, "Validando arquivo...")
+
+        elapsed_ms = max(0, int((time.perf_counter_ns() - start_ns) / 1_000_000))
+        response = WorkerResponsePayload(
+            schema_version=SCHEMA_VERSION,
+            status="success",
             command="convert",
-            input_path=str(input_path),
-            output_path=output_str,
-            language=getattr(parsed, "language", None),
+            input=str(input_path),
+            output=output_str,
+            metadata=DocumentMetadataPayload(
+                title=document.metadata.title,
+                author=document.metadata.author,
+                language=document.metadata.language,
+                identifier=document.metadata.identifier,
+            ),
+            statistics=DocumentStatisticsPayload(
+                pages=inspection.pages,
+                pages_with_text=inspection.pages_with_text,
+                pages_without_text=inspection.pages_without_text,
+                chapters=len(document.chapters),
+                paragraphs=document.paragraph_count,
+                images=document.image_count,
+                page_dimensions=inspection.page_dimensions,
+                needs_ocr=inspection.needs_ocr,
+            ),
+            warnings=list(document.warnings),
+            duration_ms=elapsed_ms,
+            error=None,
         )
         print(response.to_json(), file=sys.stdout, flush=True)
         return 0

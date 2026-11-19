@@ -20,21 +20,42 @@ pub fn execute_with_runner(cli: &Cli, runner: &PythonRunner) -> Result<WorkerRes
     }
 }
 
+#[must_use]
+pub fn format_convert_report(default_output: &Path, response: &WorkerResponse) -> String {
+    let mut out = String::new();
+    let fallback_output = default_output.to_string_lossy();
+    let out_display = response
+        .output
+        .as_deref()
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or(fallback_output.as_ref());
+
+    let _ = writeln!(out, "Conversão concluída.");
+    let _ = writeln!(out, "Arquivo: {out_display}");
+
+    if let Some(stats) = &response.statistics {
+        let _ = writeln!(out, "Páginas: {}", stats.pages);
+        let _ = writeln!(out, "Capítulos: {}", stats.chapters);
+        let _ = writeln!(out, "Parágrafos: {}", stats.paragraphs);
+        let _ = writeln!(out, "Imagens: {}", stats.images);
+    }
+
+    if !response.warnings.is_empty() {
+        let _ = writeln!(out, "Avisos:");
+        for warning in &response.warnings {
+            let _ = writeln!(out, "  - {warning}");
+        }
+    }
+
+    out
+}
+
 pub fn run_convert_command(args: &ConvertArgs, runner: &PythonRunner) -> Result<WorkerResponse> {
     init_logging(args.debug);
     let config = ConvertConfig::from_args(args)?;
     let response = runner.run_convert(&config)?;
 
-    let fallback_output = config.output.to_string_lossy();
-    let out_display = response
-        .output
-        .as_deref()
-        .unwrap_or(fallback_output.as_ref());
-    println!(
-        "Conversão concluída: '{}' -> '{}'",
-        config.input.display(),
-        out_display
-    );
+    print!("{}", format_convert_report(&config.output, &response));
 
     Ok(response)
 }
@@ -136,6 +157,41 @@ mod tests {
     use crate::protocol::{
         DocumentMetadata, DocumentStatistics, PageDimensions, ResponseStatus, SCHEMA_VERSION,
     };
+
+    #[test]
+    fn format_convert_report_displays_all_section_8_1_fields() {
+        let response = WorkerResponse {
+            schema_version: SCHEMA_VERSION,
+            status: ResponseStatus::Success,
+            command: Some("convert".to_string()),
+            input: Some("livro.pdf".to_string()),
+            output: Some("livro.epub".to_string()),
+            metadata: None,
+            statistics: Some(DocumentStatistics {
+                pages: 10,
+                pages_with_text: 10,
+                pages_without_text: 0,
+                chapters: 2,
+                paragraphs: 25,
+                images: 1,
+                page_dimensions: None,
+                needs_ocr: false,
+            }),
+            warnings: vec!["Aviso de teste.".to_string()],
+            duration_ms: Some(42),
+            error: None,
+        };
+
+        let report = format_convert_report(Path::new("livro.epub"), &response);
+        assert!(report.contains("Conversão concluída."));
+        assert!(report.contains("Arquivo: livro.epub"));
+        assert!(report.contains("Páginas: 10"));
+        assert!(report.contains("Capítulos: 2"));
+        assert!(report.contains("Parágrafos: 25"));
+        assert!(report.contains("Imagens: 1"));
+        assert!(report.contains("Avisos:"));
+        assert!(report.contains("Aviso de teste."));
+    }
 
     #[test]
     fn format_inspect_report_displays_all_section_8_2_fields() {
