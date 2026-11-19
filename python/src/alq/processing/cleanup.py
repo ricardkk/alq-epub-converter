@@ -20,7 +20,7 @@ _DIGIT_SEQ_RE = re.compile(r"\d+")
 _SIGNATURE_PUNCT_RE = re.compile(r"^[\W_]+|[\W_]+$")
 
 _DEFAULT_MARGIN_RATIO: float = 0.14
-_MAX_HEADER_FOOTER_CHARS: int = 120
+_MAX_HEADER_FOOTER_CHARS: int = 90
 _MAX_HEADER_FOOTER_LINES: int = 2
 
 
@@ -50,11 +50,11 @@ def _is_in_bottom_margin(block: ExtractedBlock, page_height: float, margin_ratio
     return block.bbox.y1 >= limit or block.bbox.y0 >= effective_height * (1.0 - margin_ratio * 1.15)
 
 
-def _is_header_footer_candidate(block: ExtractedBlock) -> bool:
+def _is_header_footer_candidate(block: ExtractedBlock, max_chars: int) -> bool:
     cleaned = normalize_text(block.text)
     if not cleaned:
         return False
-    return len(block.lines) <= _MAX_HEADER_FOOTER_LINES and len(cleaned) <= _MAX_HEADER_FOOTER_CHARS
+    return len(block.lines) <= _MAX_HEADER_FOOTER_LINES and len(cleaned) <= max_chars
 
 
 def filter_headers_and_footers(
@@ -62,6 +62,7 @@ def filter_headers_and_footers(
     *,
     margin_ratio: float = _DEFAULT_MARGIN_RATIO,
     min_repetition_pages: int = 2,
+    max_chars: int = _MAX_HEADER_FOOTER_CHARS,
 ) -> list[ExtractedPage]:
     if not pages:
         return []
@@ -71,7 +72,7 @@ def filter_headers_and_footers(
 
     for page in pages:
         for block in page.blocks:
-            if not _is_header_footer_candidate(block):
+            if not _is_header_footer_candidate(block, max_chars):
                 continue
             signature = mask_digits_for_signature(block.text)
             if not signature:
@@ -103,7 +104,7 @@ def filter_headers_and_footers(
             if (in_top or in_bottom) and is_isolated_page_number(block.text):
                 continue
 
-            if _is_header_footer_candidate(block):
+            if _is_header_footer_candidate(block, max_chars):
                 signature = mask_digits_for_signature(block.text)
                 if in_top and signature in recurring_top:
                     continue

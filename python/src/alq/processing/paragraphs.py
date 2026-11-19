@@ -144,7 +144,7 @@ def _join_two_line_segments(prev_text: str, next_text: str) -> str:
             return f"{stem}{continuation}"
         return f"{stem}-{continuation}"
 
-    if prev_clean.endswith("-") and len(prev_clean) >= 2 and prev_clean[-2].isalpha():
+    if prev_clean.endswith(("-", "\u2010")) and len(prev_clean) >= 2 and prev_clean[-2].isalpha():
         stem = prev_clean[:-1].replace("\u00ad", "")
         continuation = next_clean.replace("\u00ad", "")
         first_ch = _first_letter_or_digit(continuation)
