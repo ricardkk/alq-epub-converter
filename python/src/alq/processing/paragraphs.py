@@ -9,7 +9,7 @@ from alq.pdf.text_extractor import BoundingBox, ExtractedBlock, ExtractedLine, E
 from alq.processing.cleanup import filter_headers_and_footers
 from alq.processing.normalizer import normalize_line_text, normalize_text
 
-_UNORDERED_LIST_RE = re.compile(r"^([•●○▪▫\*]|[\-\u2013\u2014])\s+(.+)$")
+_UNORDERED_LIST_RE = re.compile(r"^([•●○▪▫\*\u00b7\u2219]|[\-\u2013\u2014])\s+(.+)$")
 _ORDERED_LIST_RE = re.compile(
     r"^(\(?\d{1,3}[\.\)]|\(?[a-zA-Z][\.\)]|\(?[ivxlcdmIVXLCDM]{1,4}[\.\)])\s+(.+)$"
 )
