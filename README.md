@@ -1,231 +1,164 @@
 # alq-epub-converter (`alq`)
 
-Conversor de arquivos PDF para EPUB 3 baseado em terminal (CLI), construído com arquitetura híbrida em **Rust** (orquestração de CLI, validação de caminhos, logging e progresso no terminal) e **Python** (extração estruturada de PDF, ordenação de layout, limpeza de cabeçalhos/rodapés, reconstrução de parágrafos/listas/capítulos, extração de imagens, OCR opcional e geração/validação do pacote EPUB 3).
+O `alq` é um conversor de PDF para EPUB 3 feito para rodar no terminal. Ele foi criado para transformar livros e artigos em PDF em arquivos mais confortáveis de ler em e-readers e celulares.
 
-## Instalação Rápida (Linux)
+Durante a conversão, o programa lê o texto em uma ou duas colunas, junta parágrafos quebrados entre páginas e colunas, limpa cabeçalhos e números de página repetidos, organiza capítulos no sumário e mantém as imagens incorporadas na ordem de leitura. Para PDFs digitalizados sem texto selecionável, também oferece OCR opcional com Tesseract.
 
-Para instalar o comando `alq` globalmente no seu usuário (`~/.local/bin/alq` e `~/.local/share/alq/.venv`):
+## Instalação
+
+No Linux, o script de instalação compila o binário e configura o ambiente Python automaticamente em `~/.local/bin/alq` e `~/.local/share/alq/.venv`:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/ricardkk/alq-epub-converter/main/install.sh | bash
 ```
 
-Para desinstalar:
+Você precisa ter `cargo` (Rust) e `uv` ou Python 3.12+ instalados na máquina. Se quiser converter PDFs escaneados, instale também o `tesseract`. O `epubcheck` é opcional: se estiver no `PATH`, o `alq` o executa ao final da conversão para validar o EPUB.
+
+Para atualizar depois, rode o mesmo comando de instalação. Para remover o programa e o ambiente criado:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/ricardkk/alq-epub-converter/main/install.sh | bash -s -- --uninstall
 ```
 
-## Pré-requisitos
+## Como usar
 
-- **Rust** (`rustc` e `cargo` estáveis; `rustfmt` e `clippy` para verificação)
-- **Python 3.12+**
-- **uv** (gerenciador de ambientes e pacotes Python)
-- **Tesseract OCR** *(opcional, exigido apenas quando `--ocr auto` encontrar páginas digitalizadas sem texto ou quando `--ocr always` for utilizado)*
-- **EPUBCheck** *(opcional, executado automaticamente após a validação estrutural interna se disponível no `PATH`)*
+### 1. Inspecionar um PDF antes de converter
 
-## Estrutura do Repositório
+Se você não sabe se o PDF tem texto selecionável ou se vai precisar de OCR, rode `alq inspect`:
+
+```bash
+alq inspect livro.pdf
+```
+
+A saída mostra o total de páginas com e sem texto, metadados do arquivo, quantidade de imagens e se o OCR provavelmente será necessário:
 
 ```text
-.
-├── Cargo.toml
-├── rust/
-│   └── src/
-│       ├── cli.rs
-│       ├── commands.rs
-│       ├── config.rs
-│       ├── error.rs
-│       ├── lib.rs
-│       ├── main.rs
-│       ├── progress.rs
-│       ├── protocol.rs
-│       └── runner.rs
-├── python/
-│   ├── pyproject.toml
-│   └── src/alq/
-│       ├── cli.py
-│       ├── errors.py
-│       ├── pipeline.py
-│       ├── protocol.py
-│       ├── domain/
-│       │   ├── blocks.py
-│       │   ├── document.py
-│       │   └── metadata.py
-│       ├── pdf/
-│       │   ├── image_extractor.py
-│       │   ├── layout.py
-│       │   ├── ocr.py
-│       │   ├── reader.py
-│       │   └── text_extractor.py
-│       ├── processing/
-│       │   ├── cleanup.py
-│       │   ├── headings.py
-│       │   ├── normalizer.py
-│       │   └── paragraphs.py
-│       └── epub/
-│           ├── builder.py
-│           ├── chapters.py
-│           ├── navigation.py
-│           ├── stylesheet.py
-│           └── validator.py
-└── tests/
-    ├── rust/
-    │   └── cli_tests.rs
-    └── python/
-        ├── test_debug_mode.py
-        ├── test_epub_builder.py
-        ├── test_epub_validator.py
-        ├── test_headings.py
-        ├── test_image_extractor.py
-        ├── test_ocr.py
-        ├── test_paragraphs.py
-        ├── test_pipeline.py
-        ├── test_protocol.py
-        ├── test_reader.py
-        ├── test_smoke.py
-        └── test_text_extractor.py
+Arquivo: livro.pdf
+Páginas: 226 (com texto: 226, sem texto: 0)
+Metadados:
+  Título: não informado
+  Autor: não informado
+  Idioma: und
+  Identificador: não informado
+Imagens: 0
+Dimensões da página: 283.46 x 425.20 pt
+Necessidade provável de OCR: Não
 ```
 
-## Funcionalidades da Pipeline
+Para integrar com scripts, passe `--json` no final do comando.
 
-1. **Inspeção e Abertura Segura (`alq.pdf.reader`)**:
-   - Validação de assinatura PDF, criptografia/senha (`PDF_PASSWORD_REQUIRED`), integridade estrutural (`PDF_OPEN_FAILED`), metadados reais (sem inventar valores ausentes), contagem de páginas com/sem texto, imagens e detecção de necessidade de OCR.
-2. **Extração Estruturada e Ordenação de Layout (`alq.pdf.text_extractor`, `alq.pdf.layout`)**:
-   - Extração de spans, linhas e blocos com coordenadas (`BoundingBox`), tamanho e nome de fonte, flags tipográficas (`is_bold`, `is_italic`) e detecção/ordenação de leitura em 1 ou 2 colunas (`column_index`).
-3. **OCR Opcional com Tesseract (`alq.pdf.ocr`)**:
-   - Modos `--ocr never` (padrão), `--ocr auto` (aplica OCR somente em páginas sem camada de texto nativo) e `--ocr always` (aplica OCR em todas as páginas), registrando avisos nas páginas reconhecidas.
-4. **Limpeza e Reconstrução Estrutural (`alq.processing`)**:
-   - Normalização Unicode NFC, remoção de caracteres invisíveis de controle e colapso de espaços horizontais;
-   - Filtragem de números de página isolados e cabeçalhos/rodapés recorrentes nas margens superior e inferior;
-   - Desifenização cautelosa no fim de linha (`-`, `\u2010`, `\u00ad`);
-   - Reconstrução de parágrafos multilinha (incluindo junção através de mudança de página), separação por espaçamento vertical e recuo de primeira linha, e agrupamento de listas ordenadas e não-ordenadas;
-   - Detecção heurística de títulos e capítulos (`h1`, `h2`, `h3`) baseada na mediana tipográfica do corpo e padrões estruturais/numéricos.
-5. **Extração e Normalização de Imagens (`alq.pdf.image_extractor`)**:
-   - Extração de imagens incorporadas via PyMuPDF e Pillow, filtrando elementos decorativos minúsculos, convertendo formatos não suportados diretamente pelo EPUB 3 (`BMP`, `TIFF`, `CMYK`, etc.) para `PNG` e intercalando `ImageBlock` na posição correta de leitura.
-6. **Geração e Validação de EPUB 3 (`alq.epub`)**:
-   - Construção de pacote EPUB 3 com `EbookLib`, escape rigoroso de XHTML (`html.escape`), folha de estilos responsiva (`styles/main.css`), sumário (`nav.xhtml` e `toc.ncx`) e inclusão exclusiva de assets referenciados;
-   - Validação estrutural interna obrigatória (ZIP, `mimetype`, `META-INF/container.xml`, manifesto `.opf`, sintaxe XML/XHTML de todos os capítulos e verificação de existência de todas as imagens/stylesheets referenciados) + integração opcional com `epubcheck`.
-7. **Diagnóstico e Modo `--debug`**:
-   - Quando `--debug` (ou `ALQ_DEBUG=1`) está ativo em `alq convert`, grava artefatos completos em `.debug/<stem>-<timestamp>-<id>/` (`inspection.json`, `extracted.json`, `normalized.json`, `document.json`, `warnings.json` e `logs.txt`) sem deixar resíduos em execuções normais.
+### 2. Converter para EPUB
 
-## Uso da CLI (`alq`)
-
-### Ajuda Geral e Subcomandos
+Para o caso comum, basta passar o caminho do PDF:
 
 ```bash
-alq --help
-alq convert --help
-alq inspect --help
+alq convert livro.pdf
 ```
 
-### 1. Converter PDF para EPUB (`alq convert`)
-
-```bash
-alq convert <INPUT> [--output <OUTPUT>] [--language <LANG>] [--ocr <MODE>] [--debug] [--overwrite]
-```
-
-| Argumento / Flag | Curta | Obrigatório | Descrição |
-|---|---|---|---|
-| `<INPUT>` | — | Sim | Caminho do arquivo PDF de entrada (`.pdf` válido com cabeçalho `%PDF-`). |
-| `--output <OUTPUT>` | `-o` | Não | Caminho do arquivo `.epub` de saída. Padrão: mesmo diretório e nome-base da entrada com extensão `.epub`. |
-| `--language <LANG>` | `-l` | Não | Código de idioma principal do documento (ex.: `pt-BR`, `en`). |
-| `--ocr <MODE>` | — | Não | Modo de OCR para páginas sem texto extraível: `never` (padrão), `auto` ou `always`. |
-| `--debug` | — | Não | Ativa logs técnicos no `stderr` e grava artefatos intermediários em `.debug/`. |
-| `--overwrite` | — | Não | Permite sobrescrever o arquivo de saída caso ele já exista. |
-
-Exemplo de saída textual (`alq convert livro.pdf`):
+O arquivo `livro.epub` é criado na mesma pasta do PDF original. Ao concluir, o terminal exibe um resumo:
 
 ```text
 Conversão concluída.
 Arquivo: livro.epub
-Páginas: 120
-Capítulos: 12
-Parágrafos: 845
-Imagens: 3
+Páginas: 226
+Capítulos: 37
+Parágrafos: 675
+Imagens: 0
 ```
 
-### 2. Inspecionar PDF (`alq inspect`)
+### 3. Exemplos do dia a dia
+
+Salvar o EPUB em outra pasta ou com outro nome:
 
 ```bash
-alq inspect <INPUT> [--json]
+alq convert livro.pdf -o ~/Livros/meu-livro.epub
 ```
 
-| Argumento / Flag | Obrigatório | Descrição |
-|---|---|---|
-| `<INPUT>` | Sim | Caminho do arquivo PDF de entrada. |
-| `--json` | Não | Exibe o resultado estruturado da inspeção (Contrato JSON v1) no `stdout`. |
+Sobrescrever um EPUB que já existe no destino (por segurança, o `alq` não apaga arquivos existentes sem essa flag):
 
-Exemplo de saída textual (`alq inspect livro.pdf`):
-
-```text
-Arquivo: livro.pdf
-Páginas: 120 (com texto: 120, sem texto: 0)
-Metadados:
-  Título: Dom Casmurro
-  Autor: Machado de Assis
-  Idioma: pt-BR
-  Identificador: não informado
-Imagens: 3
-Dimensões da página: 595.00 x 842.00 pt
-Necessidade provável de OCR: Não
+```bash
+alq convert livro.pdf --overwrite
 ```
 
-### Variáveis de Ambiente
+Definir o idioma do livro quando o PDF não informa esse metadado:
 
-- `ALQ_PYTHON` / `PDF2EPUB_PYTHON`: Caminho explícito para o executável Python a ser invocado pelo runner Rust. Caso não definido, o `alq` utiliza `python/.venv/bin/python` e, como fallback, `python3` no `PATH`.
-- `ALQ_DEBUG` / `PDF2EPUB_DEBUG`: Quando definido como `1` ou `true`, habilita o modo de depuração.
-- `ALQ_DEBUG_DIR`: Sobrescreve o diretório base onde as pastas de execução do modo `--debug` são criadas.
-- `ALQ_TESSERACT_BIN`: Caminho explícito para o executável `tesseract` utilizado pelo módulo de OCR.
+```bash
+alq convert livro.pdf -l pt-BR
+```
 
-## Códigos de Saída (`Exit Codes`) e Códigos de Erro
+Converter um PDF digitalizado usando OCR apenas nas páginas sem texto:
 
-### Códigos de Saída do Processo
+```bash
+alq convert digitalizado.pdf --ocr auto -l pt-BR
+```
 
-| Exit Code | Constante | Significado |
-|---|---|---|
-| `0` | `EXIT_SUCCESS` | Operação concluída com sucesso (ou exibição de `--help` / `--version`). |
-| `1` | `EXIT_RUNTIME_ERROR` | Erro de execução: falha ao iniciar o Python, erro no subprocesso, violação do protocolo JSON v1 ou falha durante a extração/conversão/validação. |
-| `2` | `EXIT_VALIDATION_ERROR` | Erro de validação ou uso: argumentos ausentes/inválidos na CLI, entrada inexistente, arquivo inválido ou arquivo de saída já existente sem `--overwrite`. |
+Se quiser forçar OCR em todas as páginas (útil quando a camada de texto embutida no PDF está muito corrompida), troque para `--ocr always`.
 
-### Códigos de Erro Padronizados
+Investigar algum problema na conversão gravando os arquivos intermediários em `.debug/`:
 
-| Código de Erro | Exit Code | Condição |
-|---|---|---|
-| `INPUT_NOT_FOUND` | `2` | O arquivo de entrada informado não existe. |
-| `INVALID_INPUT` | `2` | A entrada é um diretório, não possui extensão `.pdf` / assinatura `%PDF-`, ou o caminho de saída é inválido. |
-| `OUTPUT_EXISTS` | `2` | O arquivo `.epub` de saída já existe e `--overwrite` não foi informado. |
-| `PYTHON_NOT_FOUND` | `1` | O interpretador Python não foi encontrado ou não pôde ser iniciado. |
-| `PYTHON_EXECUTION_FAILED` | `1` | O subprocesso Python encerrou inesperadamente sem emitir JSON válido. |
-| `PROTOCOL_ERROR` | `1` | A saída em `stdout` do worker Python violou o Contrato JSON v1 (`schema_version: 1`). |
-| `PDF_OPEN_FAILED` | `1` | O arquivo PDF está corrompido, truncado, vazio ou não pôde ser aberto pelo PyMuPDF. |
-| `PDF_PASSWORD_REQUIRED` | `1` | O arquivo PDF está protegido por senha (`needs_pass`). |
-| `NO_EXTRACTABLE_TEXT` | `1` | Nenhum texto extraível foi encontrado no documento PDF. |
-| `TEXT_EXTRACTION_FAILED` | `1` | Falha ao extrair blocos de texto ou executar OCR nas páginas do PDF. |
-| `EPUB_BUILD_FAILED` | `1` | Falha durante a construção ou gravação do pacote EPUB. |
-| `EPUB_VALIDATION_FAILED` | `1` | O pacote EPUB gerado falhou na validação estrutural obrigatória. |
-| `CONVERSION_FAILED` | `1` | Erro geral durante o pipeline de conversão. |
-| `IO_ERROR` | `1` | Falha de leitura/escrita ou permissão no sistema de arquivos. |
+```bash
+alq convert livro.pdf --debug --overwrite
+```
 
-## Desenvolvimento e Verificação
+## Referência de opções
 
-### 1. Instalar dependências
+### `alq convert`
+
+| Opção | Descrição |
+|---|---|
+| `<INPUT>` | Caminho do arquivo `.pdf` de entrada (obrigatório). |
+| `-o`, `--output <OUTPUT>` | Caminho do `.epub` de saída. Padrão: mesma pasta e nome do PDF. |
+| `-l`, `--language <LANG>` | Idioma principal do livro (por exemplo, `pt-BR` ou `en`). |
+| `--ocr <MODE>` | Modo de OCR: `never` (padrão), `auto` ou `always`. |
+| `--overwrite` | Permite substituir o arquivo `.epub` caso ele já exista. |
+| `--debug` | Exibe logs detalhados e grava arquivos de diagnóstico em `.debug/`. |
+
+### `alq inspect`
+
+| Opção | Descrição |
+|---|---|
+| `<INPUT>` | Caminho do arquivo `.pdf` de entrada (obrigatório). |
+| `--json` | Imprime o resultado da inspeção em JSON no `stdout`. |
+
+Para ver a ajuda completa no terminal, use `alq --help`, `alq convert --help` ou `alq inspect --help`.
+
+## Problemas comuns
+
+O comando `alq` não foi encontrado após instalar: verifique se `~/.local/bin` está no seu `PATH`. No Bash, adicione `export PATH="$HOME/.local/bin:$PATH"` ao `~/.bashrc` e rode `source ~/.bashrc`.
+
+O PDF não tem texto extraível: rode `alq inspect arquivo.pdf` para confirmar se há páginas sem texto e converta com `--ocr auto` (com o `tesseract` instalado).
+
+O arquivo de saída já existe: passe `--overwrite` ou escolha outro caminho com `-o`.
+
+O PDF pede senha: o `alq` não remove proteção de senha. Desbloqueie o arquivo antes de converter.
+
+Erros de ortografia no EPUB: quando o PDF já possui texto embutido, o `alq` lê esse texto diretamente. Se o PDF original veio de um OCR antigo com erros, esses erros aparecem no resultado; nesses casos, tente converter com `--ocr always`.
+
+## Variáveis de ambiente opcionais
+
+Se precisar apontar caminhos personalizados, o `alq` aceita:
+
+- `ALQ_PYTHON`: caminho explícito do executável Python a ser usado.
+- `ALQ_TESSERACT_BIN`: caminho explícito do binário `tesseract`.
+- `ALQ_DEBUG`: defina como `1` para ativar logs detalhados sem passar `--debug`.
+- `ALQ_DEBUG_DIR`: pasta base onde os diretórios de diagnóstico do modo `--debug` são salvos.
+
+## Desenvolvimento local
+
+O projeto combina uma CLI em Rust (`rust/`) com o processamento de PDF e geração de EPUB em Python (`python/`). Para rodar localmente a partir do repositório:
 
 ```bash
 cargo fetch
 uv --directory python sync
 ```
 
-### 2. Verificações Rust
+Verificações de código e testes:
 
 ```bash
 cargo fmt --check
 cargo clippy --all-targets --all-features -- -D warnings
 cargo test
-```
 
-### 3. Verificações Python (via `uv`)
-
-```bash
 uv --directory python run ruff check . ../tests/python
 uv --directory python run ruff format --check . ../tests/python
 uv --directory python run mypy
