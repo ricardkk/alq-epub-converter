@@ -94,7 +94,15 @@ def test_normalize_text_nfc_invisible_chars_and_whitespace() -> None:
 
 
 def test_isolated_page_number_detection() -> None:
-    for sample in ["42", "- 42 -", "— 15 —", "Página 42", "Page 42", "42 / 200", "7 de 120"]:
+    for sample in [
+        "42",
+        "- 42 -",
+        "— 15 —",
+        "Página 42",
+        "Page 42",
+        "42 / 200",
+        "7 de 120",
+    ]:
         assert is_isolated_page_number(sample) is True
 
     for non_page in ["Capítulo 1", "1. Introdução", "Parágrafo com 42 palavras."]:
@@ -135,9 +143,19 @@ def test_scenario_2_paragraphs_separated_by_vertical_space_and_indentation() -> 
         _make_line("Segundo parágrafo separado por espaço vertical", 72.0, 160.0, 470.0, 174.0),
         _make_line("contendo duas linhas seguidas.", 72.0, 175.0, 340.0, 189.0),
         _make_line(
-            "Terceiro parágrafo separado por recuo de primeira linha", 96.0, 190.0, 480.0, 204.0
+            "Terceiro parágrafo separado por recuo de primeira linha",
+            96.0,
+            190.0,
+            480.0,
+            204.0,
         ),
-        _make_line("voltando para a margem esquerda na linha seguinte.", 72.0, 205.0, 450.0, 219.0),
+        _make_line(
+            "voltando para a margem esquerda na linha seguinte.",
+            72.0,
+            205.0,
+            450.0,
+            219.0,
+        ),
     ]
     page = ExtractedPage(
         page_number=1,
@@ -285,7 +303,15 @@ def test_different_columns_are_never_merged_into_same_paragraph() -> None:
     )
     right_block = _make_block(
         1,
-        [_make_line("continuação aparente mas na coluna direita.", 320.0, 120.0, 520.0, 134.0)],
+        [
+            _make_line(
+                "continuação aparente mas na coluna direita.",
+                320.0,
+                120.0,
+                520.0,
+                134.0,
+            )
+        ],
         extraction_order=1,
         column_index=1,
     )
@@ -300,3 +326,154 @@ def test_different_columns_are_never_merged_into_same_paragraph() -> None:
     assert len(reconstructed) == 2
     assert reconstructed[0].column_index == 0
     assert reconstructed[1].column_index == 1
+
+
+def test_cross_column_continuation_merges_including_proper_noun() -> None:
+    left_block = _make_block(
+        1,
+        [
+            _make_line(
+                "quadros responsáveis do escalão médio na região;",
+                36.0,
+                360.0,
+                249.6,
+                372.8,
+            ),
+            _make_line("e durante a investigação no distrito de", 36.0, 371.4, 249.6, 384.2),
+        ],
+        extraction_order=0,
+        column_index=0,
+    )
+    right_block = _make_block(
+        1,
+        [
+            _make_line(
+                "Siunvu, convidei alguns quadros dos escalões.",
+                319.5,
+                33.5,
+                533.1,
+                46.3,
+            ),
+        ],
+        extraction_order=1,
+        column_index=1,
+    )
+    page = ExtractedPage(
+        page_number=1, width=566.93, height=425.2, blocks=[left_block, right_block]
+    )
+
+    reconstructed = reconstruct_blocks_from_pages([page])
+    assert len(reconstructed) == 1
+    assert isinstance(reconstructed[0], ReconstructedParagraph)
+    assert "no distrito de Siunvu, convidei" in reconstructed[0].text
+
+
+def test_justified_paragraph_splits_on_shorter_terminal_line() -> None:
+    block = _make_block(
+        1,
+        [
+            _make_line(
+                "Primeira linha justificada ocupando toda a coluna",
+                36.0,
+                100.0,
+                249.6,
+                112.8,
+            ),
+            _make_line(
+                "elementares sobre os problemas sociais da China.",
+                36.0,
+                111.4,
+                222.5,
+                124.2,
+            ),
+            _make_line(
+                "Para conseguir isso é necessário olhar para baixo.",
+                36.0,
+                122.8,
+                249.6,
+                135.6,
+            ),
+        ],
+        extraction_order=0,
+    )
+    page = ExtractedPage(page_number=1, width=566.93, height=425.2, blocks=[block])
+
+    reconstructed = reconstruct_page_blocks(page)
+    assert len(reconstructed) == 2
+    assert isinstance(reconstructed[0], ReconstructedParagraph)
+    assert isinstance(reconstructed[1], ReconstructedParagraph)
+    assert reconstructed[0].text.endswith("China.")
+    assert reconstructed[1].text.startswith("Para conseguir")
+
+
+def test_footnote_rule_is_stripped_and_asterisk_footnote_stays_paragraph() -> None:
+    block = _make_block(
+        1,
+        [
+            _make_line("Texto principal da página antes do rodapé.", 36.0, 310.0, 249.0, 322.8),
+            _make_line("_____", 36.0, 323.0, 60.0, 335.8),
+            _make_line(
+                "* Nota de rodapé explicativa sobre o texto.",
+                36.0,
+                335.0,
+                249.0,
+                345.8,
+                font_size=8.0,
+            ),
+        ],
+        extraction_order=0,
+    )
+    page = ExtractedPage(page_number=1, width=566.93, height=425.2, blocks=[block])
+
+    reconstructed = reconstruct_page_blocks(page)
+    assert len(reconstructed) == 2
+    assert all(isinstance(item, ReconstructedParagraph) for item in reconstructed)
+    assert "___" not in reconstructed[0].text
+    assert reconstructed[1].text.startswith("* Nota de rodapé")
+
+
+def test_date_line_splits_from_preceding_title() -> None:
+    block = _make_block(
+        1,
+        [
+            _make_line("INTERPELAÇÃO AO", 382.8, 56.3, 469.8, 69.1, font_size=9.5),
+            _make_line("KUOMINTANG*", 391.0, 67.7, 459.4, 80.5, font_size=9.5),
+            _make_line("(12 de Julho de 1943)", 384.8, 79.1, 465.7, 91.9, font_size=9.5),
+        ],
+        extraction_order=0,
+    )
+    page = ExtractedPage(page_number=1, width=566.93, height=425.2, blocks=[block])
+
+    reconstructed = reconstruct_page_blocks(page)
+    assert len(reconstructed) == 2
+    assert reconstructed[0].text == "INTERPELAÇÃO AO KUOMINTANG*"
+    assert reconstructed[1].text == "(12 de Julho de 1943)"
+
+
+def test_em_dash_mid_sentence_is_not_treated_as_unordered_list() -> None:
+    block = _make_block(
+        1,
+        [
+            _make_line(
+                "e serem portanto entusiastas e activos em alto grau",
+                36.0,
+                100.0,
+                249.6,
+                112.8,
+            ),
+            _make_line(
+                "— justamente as qualidades que muitos não possuem.",
+                36.0,
+                111.4,
+                249.6,
+                124.2,
+            ),
+        ],
+        extraction_order=0,
+    )
+    page = ExtractedPage(page_number=1, width=566.93, height=425.2, blocks=[block])
+
+    reconstructed = reconstruct_page_blocks(page)
+    assert len(reconstructed) == 1
+    assert isinstance(reconstructed[0], ReconstructedParagraph)
+    assert "— justamente" in reconstructed[0].text

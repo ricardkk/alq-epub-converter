@@ -15,6 +15,8 @@ _ORDERED_LIST_RE = re.compile(
 )
 _TERMINAL_SENTENCE_CHARS: tuple[str, ...] = (".", "!", "?", ":", ";")
 _TRAILING_CLOSERS: str = "\"'”’»)]}"
+_FOOTNOTE_RULE_RE = re.compile(r"^[_─━—–-]{3,}$")
+_DATE_LINE_RE = re.compile(r"^\(\s*[^()]{2,48}?\b(?:1[0-9]|20)\d{2}\s*\)\s*\*?$")
 
 
 @dataclass(frozen=True, slots=True)
@@ -126,6 +128,11 @@ def _ends_with_terminal_punctuation(text: str) -> bool:
     if not stripped:
         return False
     return stripped.endswith(_TERMINAL_SENTENCE_CHARS)
+
+
+def _is_all_uppercase(text: str) -> bool:
+    letters = [ch for ch in text if ch.isalpha()]
+    return len(letters) >= 2 and all(ch.isupper() for ch in letters)
 
 
 def _join_two_line_segments(prev_text: str, next_text: str) -> str:
@@ -259,6 +266,7 @@ class _ListAccumulator:
     bboxes: list[BoundingBox]
     last_line: ExtractedLine
     marker_x0: float
+    max_width: float = 0.0
 
     def to_list(self) -> ReconstructedList:
         return ReconstructedList(
@@ -353,6 +361,9 @@ def _should_split_paragraph(
     if y0_step > last_line.font_size * 2.05:
         return True
 
+    if _DATE_LINE_RE.match(curr_line.text.strip()) or _DATE_LINE_RE.match(acc.lines[-1].strip()):
+        return True
+
     indent_threshold = max(10.0, curr_line.font_size * 0.9)
     ref_left_x0 = min(acc.min_x0, column_left_margin)
 
@@ -367,7 +378,7 @@ def _should_split_paragraph(
     if (
         len(acc.lines) >= 2
         and _ends_with_terminal_punctuation(acc.lines[-1])
-        and last_line.bbox.width < acc.max_width * 0.72
+        and last_line.bbox.width < acc.max_width * 0.90
         and _starts_with_uppercase(curr_line.text)
     ):
         return True
@@ -406,7 +417,8 @@ def _can_continue_list_item(
 
     is_indented_continuation = curr_line.bbox.x0 >= acc.marker_x0 + 6.0
     prev_unfinished = not _ends_with_terminal_punctuation(acc.items[-1])
-    return is_indented_continuation or prev_unfinished
+    full_width_continuation = acc.max_width > 0.0 and last_line.bbox.width >= acc.max_width * 0.90
+    return is_indented_continuation or prev_unfinished or full_width_continuation
 
 
 def _can_append_next_list_item(
@@ -466,12 +478,34 @@ def reconstruct_page_blocks(page: ExtractedPage) -> list[ReconstructedCandidateB
                 results.append(lst)
             list_acc = None
 
+    after_footnote_rule = False
     for item in annotated_lines:
         raw_line_text = normalize_line_text(item.line.text, keep_soft_hyphen=True)
         if not raw_line_text:
             continue
 
-        list_match = parse_list_item(raw_line_text)
+        if _FOOTNOTE_RULE_RE.match(raw_line_text.strip()):
+            flush()
+            after_footnote_rule = True
+            continue
+
+        list_match = (
+            None
+            if (after_footnote_rule and raw_line_text.lstrip().startswith("*"))
+            else parse_list_item(raw_line_text)
+        )
+        after_footnote_rule = False
+        if (
+            list_match is not None
+            and para_acc is not None
+            and item.column_index == para_acc.column_index
+            and not _ends_with_terminal_punctuation(para_acc.lines[-1])
+            and (
+                _starts_with_lowercase(list_match.text)
+                or (not list_match.ordered and list_match.marker in ("\u2014", "\u2013", "-"))
+            )
+        ):
+            list_match = None
         if list_match is not None:
             if para_acc is not None:
                 flush()
@@ -480,6 +514,7 @@ def reconstruct_page_blocks(page: ExtractedPage) -> list[ReconstructedCandidateB
                 list_acc.markers.append(list_match.marker)
                 list_acc.bboxes.append(item.line.bbox)
                 list_acc.last_line = item.line
+                list_acc.max_width = max(list_acc.max_width, item.line.bbox.width)
             else:
                 flush()
                 list_acc = _ListAccumulator(
@@ -496,6 +531,7 @@ def reconstruct_page_blocks(page: ExtractedPage) -> list[ReconstructedCandidateB
                     bboxes=[item.line.bbox],
                     last_line=item.line,
                     marker_x0=item.line.bbox.x0,
+                    max_width=item.line.bbox.width,
                 )
             continue
 
@@ -504,6 +540,7 @@ def reconstruct_page_blocks(page: ExtractedPage) -> list[ReconstructedCandidateB
                 list_acc.items[-1] = _join_two_line_segments(list_acc.items[-1], raw_line_text)
                 list_acc.bboxes.append(item.line.bbox)
                 list_acc.last_line = item.line
+                list_acc.max_width = max(list_acc.max_width, item.line.bbox.width)
                 continue
             flush()
 
@@ -535,19 +572,22 @@ def reconstruct_page_blocks(page: ExtractedPage) -> list[ReconstructedCandidateB
     return results
 
 
-def _can_merge_paragraphs_across_page_break(
+def _is_break_continuation(
     prev_block: ReconstructedCandidateBlock,
     next_block: ReconstructedCandidateBlock,
+    *,
+    allow_cross_page: bool,
 ) -> bool:
-    if not isinstance(prev_block, ReconstructedParagraph):
-        return False
     if not isinstance(next_block, ReconstructedParagraph):
         return False
 
-    if _ends_with_terminal_punctuation(prev_block.text):
-        return False
-
-    if not _starts_with_lowercase(next_block.text):
+    prev_end_page = prev_block.end_page_number or prev_block.page_number
+    same_page_next_col = (
+        next_block.page_number == prev_end_page
+        and next_block.column_index != prev_block.column_index
+    )
+    next_page = allow_cross_page and next_block.page_number == prev_end_page + 1
+    if not (same_page_next_col or next_page):
         return False
 
     if abs(prev_block.font_size - next_block.font_size) > 1.5:
@@ -556,7 +596,64 @@ def _can_merge_paragraphs_across_page_break(
     if prev_block.is_bold != next_block.is_bold or prev_block.is_italic != next_block.is_italic:
         return False
 
-    return True
+    next_text = next_block.text.strip()
+    if not next_text or _DATE_LINE_RE.match(next_text) or _is_all_uppercase(next_text):
+        return False
+
+    if isinstance(prev_block, ReconstructedParagraph):
+        if _ends_with_terminal_punctuation(prev_block.text):
+            return False
+        if _is_all_uppercase(prev_block.text):
+            return False
+        if _starts_with_lowercase(next_text):
+            return True
+        return prev_block.line_count >= 2
+
+    if isinstance(prev_block, ReconstructedList) and prev_block.items:
+        last_item = prev_block.items[-1]
+        if _ends_with_terminal_punctuation(last_item):
+            return False
+        return _starts_with_lowercase(next_text) or len(last_item) >= 40
+
+    return False
+
+
+def _merge_continuation_block(
+    prev_block: ReconstructedCandidateBlock,
+    next_block: ReconstructedParagraph,
+) -> ReconstructedCandidateBlock:
+    if isinstance(prev_block, ReconstructedParagraph):
+        merged_text = join_hyphenated_lines(prev_block.text, next_block.text)
+        return ReconstructedParagraph(
+            text=merged_text,
+            page_number=prev_block.page_number,
+            bbox=prev_block.bbox,
+            font_size=prev_block.font_size,
+            font_name=prev_block.font_name,
+            is_bold=prev_block.is_bold,
+            is_italic=prev_block.is_italic,
+            column_index=next_block.column_index,
+            end_page_number=next_block.end_page_number or next_block.page_number,
+            line_count=prev_block.line_count + next_block.line_count,
+            flags=prev_block.flags,
+        )
+
+    merged_items = list(prev_block.items)
+    merged_items[-1] = join_hyphenated_lines(merged_items[-1], next_block.text)
+    return ReconstructedList(
+        ordered=prev_block.ordered,
+        items=merged_items,
+        markers=list(prev_block.markers),
+        page_number=prev_block.page_number,
+        bbox=prev_block.bbox,
+        font_size=prev_block.font_size,
+        font_name=prev_block.font_name,
+        is_bold=prev_block.is_bold,
+        is_italic=prev_block.is_italic,
+        column_index=next_block.column_index,
+        end_page_number=next_block.end_page_number or next_block.page_number,
+        flags=prev_block.flags,
+    )
 
 
 def reconstruct_blocks_from_pages(
@@ -573,36 +670,19 @@ def reconstruct_blocks_from_pages(
     combined: list[ReconstructedCandidateBlock] = []
     for page in working_pages:
         page_blocks = reconstruct_page_blocks(page)
-        if not page_blocks:
-            continue
-
-        if (
-            merge_across_pages
-            and combined
-            and _can_merge_paragraphs_across_page_break(combined[-1], page_blocks[0])
-        ):
-            prev_para = combined[-1]
-            next_para = page_blocks[0]
-            assert isinstance(prev_para, ReconstructedParagraph)
-            assert isinstance(next_para, ReconstructedParagraph)
-
-            merged_text = join_hyphenated_lines(prev_para.text, next_para.text)
-            combined[-1] = ReconstructedParagraph(
-                text=merged_text,
-                page_number=prev_para.page_number,
-                bbox=prev_para.bbox,
-                font_size=prev_para.font_size,
-                font_name=prev_para.font_name,
-                is_bold=prev_para.is_bold,
-                is_italic=prev_para.is_italic,
-                column_index=prev_para.column_index,
-                end_page_number=next_para.end_page_number or next_para.page_number,
-                line_count=prev_para.line_count + next_para.line_count,
-                flags=prev_para.flags,
-            )
-            combined.extend(page_blocks[1:])
-        else:
-            combined.extend(page_blocks)
+        for block in page_blocks:
+            if (
+                combined
+                and isinstance(block, ReconstructedParagraph)
+                and _is_break_continuation(
+                    combined[-1],
+                    block,
+                    allow_cross_page=merge_across_pages,
+                )
+            ):
+                combined[-1] = _merge_continuation_block(combined[-1], block)
+            else:
+                combined.append(block)
 
     return combined
 
