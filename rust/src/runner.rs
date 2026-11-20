@@ -27,18 +27,22 @@ impl Default for PythonRunner {
 impl PythonRunner {
     #[must_use]
     pub fn new() -> Self {
+        let python_bin = resolve_python_executable();
+        let python_src_dir = resolve_python_src_dir_for(&python_bin);
         Self {
-            python_bin: resolve_python_executable(),
-            python_src_dir: resolve_python_src_dir(),
+            python_bin,
+            python_src_dir,
             extra_env: Vec::new(),
         }
     }
 
     #[must_use]
     pub fn with_executable(python_bin: impl Into<PathBuf>) -> Self {
+        let python_bin = python_bin.into();
+        let python_src_dir = resolve_python_src_dir_for(&python_bin);
         Self {
-            python_bin: python_bin.into(),
-            python_src_dir: resolve_python_src_dir(),
+            python_bin,
+            python_src_dir,
             extra_env: Vec::new(),
         }
     }
@@ -201,6 +205,27 @@ fn candidate_venv_paths() -> Vec<PathBuf> {
         PathBuf::from("python/.venv/Scripts/python.exe"),
     ];
 
+    if let Ok(exe_path) = std::env::current_exe() {
+        if let Some(exe_dir) = exe_path.parent() {
+            candidates.push(exe_dir.join(".venv/bin/python"));
+            if let Some(prefix_dir) = exe_dir.parent() {
+                candidates.push(prefix_dir.join("share/alq/.venv/bin/python"));
+                candidates.push(prefix_dir.join("lib/alq/.venv/bin/python"));
+            }
+        }
+    }
+
+    if let Some(xdg_data_home) = std::env::var_os("XDG_DATA_HOME").filter(|v| !v.is_empty()) {
+        candidates.push(PathBuf::from(xdg_data_home).join("alq/.venv/bin/python"));
+    }
+
+    if let Some(home) = std::env::var_os("HOME").filter(|v| !v.is_empty()) {
+        candidates.push(PathBuf::from(home).join(".local/share/alq/.venv/bin/python"));
+    }
+
+    candidates.push(PathBuf::from("/usr/local/lib/alq/.venv/bin/python"));
+    candidates.push(PathBuf::from("/usr/lib/alq/.venv/bin/python"));
+
     if let Some(manifest_dir) = option_env!("CARGO_MANIFEST_DIR") {
         let root = Path::new(manifest_dir);
         candidates.push(root.join("python/.venv/bin/python"));
@@ -210,7 +235,7 @@ fn candidate_venv_paths() -> Vec<PathBuf> {
     candidates
 }
 
-fn resolve_python_src_dir() -> Option<PathBuf> {
+fn resolve_python_src_dir_for(python_bin: &Path) -> Option<PathBuf> {
     let cwd_candidate = PathBuf::from("python/src");
     if cwd_candidate.is_dir() {
         return std::fs::canonicalize(&cwd_candidate)
@@ -219,9 +244,12 @@ fn resolve_python_src_dir() -> Option<PathBuf> {
     }
 
     if let Some(manifest_dir) = option_env!("CARGO_MANIFEST_DIR") {
-        let manifest_candidate = Path::new(manifest_dir).join("python/src");
-        if manifest_candidate.is_dir() {
-            return Some(manifest_candidate);
+        let manifest_root = Path::new(manifest_dir);
+        if python_bin.starts_with(manifest_root) {
+            let manifest_candidate = manifest_root.join("python/src");
+            if manifest_candidate.is_dir() {
+                return Some(manifest_candidate);
+            }
         }
     }
 
@@ -273,5 +301,19 @@ mod tests {
 
         let default_py = resolve_python_from_env_and_paths(None, None, &[]);
         assert_eq!(default_py, PathBuf::from("python3"));
+    }
+
+    #[test]
+    fn resolves_first_existing_venv_candidate() {
+        let temp_dir = std::env::temp_dir().join(format!("alq_runner_test_{}", std::process::id()));
+        let venv_python = temp_dir.join("share/alq/.venv/bin/python");
+        std::fs::create_dir_all(venv_python.parent().unwrap()).unwrap();
+        std::fs::write(&venv_python, "").unwrap();
+
+        let missing = temp_dir.join("missing/bin/python");
+        let chosen = resolve_python_from_env_and_paths(None, None, &[missing, venv_python.clone()]);
+        assert_eq!(chosen, venv_python);
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
     }
 }

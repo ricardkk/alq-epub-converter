@@ -2,6 +2,20 @@
 
 Conversor de arquivos PDF para EPUB 3 baseado em terminal (CLI), construído com arquitetura híbrida em **Rust** (orquestração de CLI, validação de caminhos, logging e progresso no terminal) e **Python** (extração estruturada de PDF, ordenação de layout, limpeza de cabeçalhos/rodapés, reconstrução de parágrafos/listas/capítulos, extração de imagens, OCR opcional e geração/validação do pacote EPUB 3).
 
+## Instalação Rápida (Linux)
+
+Para instalar o comando `alq` globalmente no seu usuário (`~/.local/bin/alq` e `~/.local/share/alq/.venv`):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/ricardkk/alq-epub-converter/main/install.sh | bash
+```
+
+Para desinstalar:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/ricardkk/alq-epub-converter/main/install.sh | bash -s -- --uninstall
+```
+
 ## Pré-requisitos
 
 - **Rust** (`rustc` e `cargo` estáveis; `rustfmt` e `clippy` para verificação)
