@@ -35,6 +35,21 @@ def _normalize_optional_str(value: object) -> str | None:
     return cleaned if cleaned else None
 
 
+def is_garbled_text(raw_text: str) -> bool:
+    relevant = [ch for ch in raw_text if ch not in "\n\r\t "]
+    if len(relevant) < 10:
+        return False
+
+    control_or_replacement = sum(
+        1 for ch in relevant if ord(ch) < 32 or ch == "\ufffd" or (0xE000 <= ord(ch) <= 0xF8FF)
+    )
+    if (control_or_replacement / len(relevant)) >= 0.15:
+        return True
+
+    alnum = sum(1 for ch in relevant if ch.isalnum())
+    return len(relevant) >= 40 and (alnum / len(relevant)) < 0.35
+
+
 def _extract_language(doc: pymupdf.Document, raw_metadata: dict[str, Any]) -> str:
     meta_lang = _normalize_optional_str(raw_metadata.get("language"))
     if meta_lang is not None:
@@ -193,6 +208,7 @@ def inspect_pdf(path: Path | str, *, debug: bool = False) -> PdfInspectionResult
         pages_with_text = 0
         pages_without_text = 0
         pages_without_text_with_images = 0
+        garbled_pages = 0
         total_images = 0
         first_page_dimensions: PageDimensionsPayload | None = None
 
@@ -205,12 +221,16 @@ def inspect_pdf(path: Path | str, *, debug: bool = False) -> PdfInspectionResult
                 if first_page_dimensions is None:
                     first_page_dimensions = PageDimensionsPayload(width=width, height=height)
 
-                page_text = str(page.get_text("text")).strip()
-                has_text = bool(page_text)
+                raw_page_text = str(page.get_text("text"))
+                page_text = raw_page_text.strip()
+                page_is_garbled = bool(page_text) and is_garbled_text(raw_page_text)
+                has_text = bool(page_text) and not page_is_garbled
                 if has_text:
                     pages_with_text += 1
                 else:
                     pages_without_text += 1
+                    if page_is_garbled:
+                        garbled_pages += 1
 
                 image_refs = page.get_images(full=False)
                 page_image_count = len(image_refs)
@@ -236,20 +256,36 @@ def inspect_pdf(path: Path | str, *, debug: bool = False) -> PdfInspectionResult
         needs_ocr = False
         if pages_with_text == 0:
             needs_ocr = True
-            warnings.append(
-                "Nenhum texto extraível encontrado; o documento parece ser escaneado e exigirá OCR."
-            )
-        elif pages_without_text > 0:
-            if pages_without_text_with_images > 0:
+            if garbled_pages > 0:
                 warnings.append(
-                    f"{pages_without_text} de {total_pages} página(s) não possuem texto extraível "
-                    f"({pages_without_text_with_images} página(s) sem texto contêm imagens; "
-                    "possível necessidade parcial de OCR)."
+                    f"Camada de texto corrompida ou sem mapa Unicode válido em {garbled_pages} "
+                    f"de {total_pages} página(s); o documento exigirá OCR "
+                    "(--ocr auto ou --ocr always)."
                 )
             else:
                 warnings.append(
-                    f"{pages_without_text} de {total_pages} página(s) não possuem texto extraível."
+                    "Nenhum texto extraível encontrado; o documento parece ser escaneado "
+                    "e exigirá OCR."
                 )
+        elif pages_without_text > 0:
+            if garbled_pages > 0:
+                warnings.append(
+                    f"{garbled_pages} de {total_pages} página(s) possuem camada de texto "
+                    "corrompida ou ilegível; considere usar --ocr auto."
+                )
+            remaining_without_text = pages_without_text - garbled_pages
+            if remaining_without_text > 0:
+                if pages_without_text_with_images > 0:
+                    warnings.append(
+                        f"{remaining_without_text} de {total_pages} página(s) não possuem "
+                        f"texto extraível ({pages_without_text_with_images} página(s) sem texto "
+                        "contêm imagens; possível necessidade parcial de OCR)."
+                    )
+                else:
+                    warnings.append(
+                        f"{remaining_without_text} de {total_pages} página(s) não possuem "
+                        "texto extraível."
+                    )
 
         elapsed_ms = max(0, int((time.perf_counter_ns() - start_ns) / 1_000_000))
         resolved_dimensions = first_page_dimensions or PageDimensionsPayload(

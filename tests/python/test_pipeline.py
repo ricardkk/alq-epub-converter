@@ -275,3 +275,35 @@ def test_assemble_chapters_absorbs_consecutive_titles_on_same_page() -> None:
         Heading("MAO TSETUNG", level=1),
         Paragraph("Tomo III"),
     ]
+
+
+def test_assemble_chapters_splits_on_deeper_level_when_single_cover_title() -> None:
+    classified: list[ClassifiedBlock] = [
+        _make_detected_heading("The Metamorphosis", level=1, page_number=1),
+        _make_reconstructed_para("Franz Kafka", page_number=1),
+        _make_reconstructed_para("Translator note.", page_number=2),
+        _make_detected_heading("I", level=3, page_number=3),
+        _make_reconstructed_para("One morning, as Gregor Samsa...", page_number=3),
+        _make_detected_heading("II", level=3, page_number=33),
+        _make_reconstructed_para("Gregor first woke up...", page_number=33),
+        _make_detected_heading("III", level=3, page_number=66),
+        _make_reconstructed_para("Gregor's serious wound...", page_number=66),
+    ]
+
+    chapters = assemble_chapters(classified)
+
+    assert [chapter.title for chapter in chapters] == [
+        "The Metamorphosis",
+        "I",
+        "II",
+        "III",
+    ]
+    assert chapters[0].blocks == [
+        Heading("The Metamorphosis", level=1),
+        Paragraph("Franz Kafka"),
+        Paragraph("Translator note."),
+    ]
+    assert chapters[1].blocks == [
+        Heading("I", level=3),
+        Paragraph("One morning, as Gregor Samsa..."),
+    ]

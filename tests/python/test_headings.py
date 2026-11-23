@@ -315,3 +315,26 @@ def test_centered_single_item_uppercase_list_becomes_subtitle_with_marker() -> N
     assert [(h.text, h.level) for h in headings] == [
         ("I. AS REIVINDICAÇÕES FUNDAMENTAIS DO POVO", 2)
     ]
+
+
+def test_chapter_keyword_detected_when_smaller_than_body_and_long_roman() -> None:
+    blocks = [
+        _make_column_block(
+            _body_text("Parágrafo 1"), 36.0, 450.0, 40.0, font_size=12.0, line_count=10
+        ),
+        _make_column_block("CAPÍTULO II", 180.0, 300.0, 200.0, font_size=10.0),
+        _make_column_block(
+            _body_text("Parágrafo 2"), 36.0, 450.0, 230.0, font_size=12.0, line_count=10
+        ),
+        _make_column_block("CAPÍTULO CXXXVIII", 160.0, 320.0, 400.0, font_size=10.0),
+        _make_column_block(
+            _body_text("Parágrafo 3"), 36.0, 450.0, 430.0, font_size=12.0, line_count=10
+        ),
+    ]
+
+    headings = detect_headings(blocks)
+
+    assert [(h.text, h.level) for h in headings] == [
+        ("CAPÍTULO II", 1),
+        ("CAPÍTULO CXXXVIII", 1),
+    ]

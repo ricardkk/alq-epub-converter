@@ -9,7 +9,7 @@ import pymupdf
 
 from alq.errors import NoExtractableTextError, TextExtractionError
 from alq.pdf.layout import order_page_blocks
-from alq.pdf.reader import open_pdf
+from alq.pdf.reader import is_garbled_text, open_pdf
 from alq.protocol import emit_debug
 
 PYMUPDF_ITALIC_FLAG: int = 2
@@ -440,6 +440,7 @@ def extract_pdf_pages_with_ocr(
     pdf_path = Path(path)
     pages: list[ExtractedPage] = []
     ocr_pages: list[int] = []
+    garbled_pages: list[int] = []
     total_blocks = 0
 
     with open_pdf(pdf_path) as doc:
@@ -464,31 +465,60 @@ def extract_pdf_pages_with_ocr(
                 )
                 ocr_pages.append(page_number)
             else:
-                extracted_page = extract_page(
-                    page,
-                    page_number=page_number,
-                    order_layout=order_layout,
-                )
-                if resolved_mode == OcrMode.AUTO and not extracted_page.blocks:
-                    extracted_page = ocr_pdf_page(
+                raw_page_text = str(page.get_text("text"))
+                if is_garbled_text(raw_page_text):
+                    garbled_pages.append(page_number)
+                    if resolved_mode == OcrMode.AUTO:
+                        extracted_page = ocr_pdf_page(
+                            page,
+                            page_number=page_number,
+                            language=language,
+                            order_layout=order_layout,
+                            debug=debug,
+                        )
+                        ocr_pages.append(page_number)
+                    else:
+                        extracted_page = ExtractedPage(
+                            page_number=page_number,
+                            width=round(float(page.rect.width), 2),
+                            height=round(float(page.rect.height), 2),
+                            blocks=[],
+                        )
+                else:
+                    extracted_page = extract_page(
                         page,
                         page_number=page_number,
-                        language=language,
                         order_layout=order_layout,
-                        debug=debug,
                     )
-                    ocr_pages.append(page_number)
+                    if resolved_mode == OcrMode.AUTO and not extracted_page.blocks:
+                        extracted_page = ocr_pdf_page(
+                            page,
+                            page_number=page_number,
+                            language=language,
+                            order_layout=order_layout,
+                            debug=debug,
+                        )
+                        ocr_pages.append(page_number)
 
             total_blocks += len(extracted_page.blocks)
             pages.append(extracted_page)
 
     emit_debug(
         f"Extração de texto concluída para '{pdf_path}': "
-        f"pages={len(pages)}, total_blocks={total_blocks}, ocr_pages={ocr_pages}",
+        f"pages={len(pages)}, total_blocks={total_blocks}, "
+        f"ocr_pages={ocr_pages}, garbled_pages={garbled_pages}",
         enabled=debug,
     )
 
     if total_blocks == 0:
+        if garbled_pages:
+            raise NoExtractableTextError(
+                f"A camada de texto do arquivo PDF '{pdf_path}' está corrompida ou ilegível "
+                f"(fontes sem mapa Unicode válido em {len(garbled_pages)} página(s)).",
+                hint=(
+                    "Execute novamente com --ocr auto ou --ocr always (requer Tesseract instalado)."
+                ),
+            )
         raise NoExtractableTextError(
             f"Nenhum texto extraível foi encontrado no arquivo PDF '{pdf_path}'.",
             hint="O documento pode ser digitalizado (imagem) e exigir OCR prévio.",

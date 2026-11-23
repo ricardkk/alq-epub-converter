@@ -477,3 +477,49 @@ def test_em_dash_mid_sentence_is_not_treated_as_unordered_list() -> None:
     assert len(reconstructed) == 1
     assert isinstance(reconstructed[0], ReconstructedParagraph)
     assert "— justamente" in reconstructed[0].text
+
+
+def test_filter_headers_and_footers_preserves_larger_cover_title() -> None:
+    cover_title = _make_block(
+        1,
+        [_make_line("The Metamorphosis", 90.0, 50.0, 300.0, 74.0, font_size=24.0)],
+        extraction_order=0,
+    )
+    cover_author = _make_block(
+        1,
+        [_make_line("Franz Kafka", 150.0, 90.0, 240.0, 106.0, font_size=16.0)],
+        extraction_order=1,
+    )
+    pages = [
+        ExtractedPage(page_number=1, width=388.8, height=590.4, blocks=[cover_title, cover_author])
+    ]
+    for page_num in range(2, 6):
+        header = _make_block(
+            page_num,
+            [_make_line("The Metamorphosis", 52.0, 26.0, 133.0, 37.0, font_size=11.0)],
+            extraction_order=0,
+        )
+        body = _make_block(
+            page_num,
+            [
+                _make_line(
+                    f"Corpo da página {page_num} com texto regular.",
+                    52.0,
+                    100.0,
+                    336.0,
+                    114.0,
+                    font_size=12.0,
+                )
+            ],
+            extraction_order=1,
+        )
+        pages.append(
+            ExtractedPage(page_number=page_num, width=388.8, height=590.4, blocks=[header, body])
+        )
+
+    cleaned = filter_headers_and_footers(pages)
+    assert [b.text for b in cleaned[0].blocks] == ["The Metamorphosis", "Franz Kafka"]
+    for page in cleaned[1:]:
+        assert [b.text for b in page.blocks] == [
+            f"Corpo da página {page.page_number} com texto regular."
+        ]

@@ -69,6 +69,8 @@ def filter_headers_and_footers(
 
     top_signature_pages: dict[str, set[int]] = defaultdict(set)
     bottom_signature_pages: dict[str, set[int]] = defaultdict(set)
+    top_signature_fonts: dict[str, list[float]] = defaultdict(list)
+    bottom_signature_fonts: dict[str, list[float]] = defaultdict(list)
 
     for page in pages:
         for block in page.blocks:
@@ -79,17 +81,25 @@ def filter_headers_and_footers(
                 continue
             if _is_in_top_margin(block, page.height, margin_ratio):
                 top_signature_pages[signature].add(page.page_number)
+                if block.font_size > 0.0:
+                    top_signature_fonts[signature].append(block.font_size)
             if _is_in_bottom_margin(block, page.height, margin_ratio):
                 bottom_signature_pages[signature].add(page.page_number)
+                if block.font_size > 0.0:
+                    bottom_signature_fonts[signature].append(block.font_size)
 
     effective_min_pages = max(2, min_repetition_pages)
     recurring_top = {
-        sig
+        sig: sorted(top_signature_fonts[sig])[len(top_signature_fonts[sig]) // 2]
+        if top_signature_fonts[sig]
+        else 0.0
         for sig, page_nums in top_signature_pages.items()
         if len(page_nums) >= effective_min_pages
     }
     recurring_bottom = {
-        sig
+        sig: sorted(bottom_signature_fonts[sig])[len(bottom_signature_fonts[sig]) // 2]
+        if bottom_signature_fonts[sig]
+        else 0.0
         for sig, page_nums in bottom_signature_pages.items()
         if len(page_nums) >= effective_min_pages
     }
@@ -107,9 +117,13 @@ def filter_headers_and_footers(
             if _is_header_footer_candidate(block, max_chars):
                 signature = mask_digits_for_signature(block.text)
                 if in_top and signature in recurring_top:
-                    continue
+                    typical_fs = recurring_top[signature]
+                    if typical_fs <= 0.0 or block.font_size < typical_fs * 1.35:
+                        continue
                 if in_bottom and signature in recurring_bottom:
-                    continue
+                    typical_fs = recurring_bottom[signature]
+                    if typical_fs <= 0.0 or block.font_size < typical_fs * 1.35:
+                        continue
 
             kept_blocks.append(block)
 

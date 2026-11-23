@@ -350,3 +350,84 @@ def test_pdf_without_extractable_text_raises_no_extractable_text_error(
 
     with pytest.raises(NoExtractableTextError):
         extract_text_blocks(pdf_path)
+
+
+def test_is_two_column_layout_false_for_spanning_body_with_centered_marker() -> None:
+    def make_block(
+        text: str,
+        x0: float,
+        y0: float,
+        x1: float,
+        y1: float,
+        order: int,
+    ) -> ExtractedBlock:
+        bbox = BoundingBox(x0, y0, x1, y1)
+        span = ExtractedSpan(
+            text=text,
+            bbox=bbox,
+            font_size=12.0,
+            font_name="Times",
+            flags=0,
+            is_bold=False,
+            is_italic=False,
+        )
+        line = ExtractedLine(
+            text=text,
+            bbox=bbox,
+            spans=[span],
+            font_size=12.0,
+            font_name="Times",
+            is_bold=False,
+            is_italic=False,
+        )
+        return ExtractedBlock(
+            page_number=3,
+            bbox=bbox,
+            text=text,
+            lines=[line],
+            font_size=12.0,
+            font_name="Times",
+            flags=0,
+            is_bold=False,
+            is_italic=False,
+            extraction_order=order,
+        )
+
+    blocks = [
+        make_block("The Metamorphosis", 52.2, 26.3, 133.1, 37.3, 0),
+        make_block("I", 190.2, 62.3, 199.6, 75.8, 1),
+        make_block(
+            "One morning, as Gregor Samsa was waking up from anxious dreams, he discovered that "
+            "in bed he had been changed into a monstrous verminous bug.",
+            52.2,
+            84.0,
+            336.4,
+            180.0,
+            2,
+        ),
+        make_block("3 of 105", 52.2, 560.0, 95.0, 571.0, 3),
+    ]
+
+    assert is_two_column_layout(blocks, 388.8) is False
+    ordered = order_page_blocks(blocks, 388.8)
+    assert [b.text for b in ordered[:3]] == [
+        "The Metamorphosis",
+        "I",
+        "One morning, as Gregor Samsa was waking up from anxious dreams, he discovered that "
+        "in bed he had been changed into a monstrous verminous bug.",
+    ]
+    assert [b.column_index for b in ordered] == [0, 0, 0, 0]
+
+
+def test_is_garbled_text_detects_corrupted_glyph_codes() -> None:
+    from alq.pdf.reader import is_garbled_text
+
+    garbled_control = '\x01\x02\x03!\x04"\x05#\x06\x07\x08\x09\x0b\x0c\x0e\x0fABB ( BC9D'
+    garbled_symbols = "!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~!\"#$%&'()*+,-./:;<=>?@"
+    valid_pt = "Uma noite destas, vindo da cidade para o Engenho Novo, encontrei no trem."
+    valid_short = "CAPÍTULO I"
+
+    assert is_garbled_text(garbled_control) is True
+    assert is_garbled_text(garbled_symbols) is True
+    assert is_garbled_text(valid_pt) is False
+    assert is_garbled_text(valid_short) is False

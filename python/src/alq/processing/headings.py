@@ -20,7 +20,7 @@ _MAX_HEADING_LINES: int = 3
 
 _CHAPTER_KEYWORD_RE = re.compile(
     r"^(?:cap[ií]tulo|chapter|parte|part|livro|book)\s+"
-    r"(?:[0-9]{1,3}|[ivxlcdm]{1,7}|um|dois|tr[eê]s|quatro|cinco|seis|sete|oito|nove|dez|"
+    r"(?:[0-9]{1,3}|[ivxlcdm]{1,12}|um|dois|tr[eê]s|quatro|cinco|seis|sete|oito|nove|dez|"
     r"primeiro|segundo|terceiro|one|two|three)"
     r"(?:\s*[:\-\u2013\u2014\.]?\s*\S.*)?$",
     re.IGNORECASE,
@@ -28,7 +28,7 @@ _CHAPTER_KEYWORD_RE = re.compile(
 
 _SECTION_KEYWORD_RE = re.compile(
     r"^(?:se[cç][aã]o|section)\s+"
-    r"(?:[0-9]{1,3}(?:\.[0-9]{1,3})*|[ivxlcdm]{1,7})"
+    r"(?:[0-9]{1,3}(?:\.[0-9]{1,3})*|[ivxlcdm]{1,12})"
     r"(?:\s*[:\-\u2013\u2014\.]?\s*\S.*)?$",
     re.IGNORECASE,
 )
@@ -474,7 +474,7 @@ def evaluate_heading_candidate(
         score += 0.46
     elif font_ratio >= 1.12:
         score += 0.30
-    elif font_ratio < 0.95:
+    elif font_ratio < 0.95 and not _is_keyword_heading(text):
         score -= 0.25
 
     if block.is_bold:

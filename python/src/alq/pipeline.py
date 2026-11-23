@@ -124,7 +124,17 @@ def assemble_chapters(flow_items: Sequence[FlowItem]) -> list[Chapter]:
         domain_blocks = [_to_domain_block(item) for item in flow_items]
         return [Chapter(title=None, level=1, blocks=domain_blocks)]
 
-    chapter_level = min(h.level for h in detected_headings)
+    level_counts: dict[int, int] = {}
+    for heading in detected_headings:
+        level_counts[heading.level] = level_counts.get(heading.level, 0) + 1
+
+    min_level = min(level_counts)
+    chapter_level = min_level
+    if level_counts[min_level] == 1:
+        deeper_levels = [lvl for lvl, cnt in level_counts.items() if lvl > min_level and cnt >= 2]
+        if deeper_levels:
+            chapter_level = min(deeper_levels)
+
     chapters: list[Chapter] = []
     current_title: str | None = None
     current_level: int = 1
@@ -154,6 +164,14 @@ def assemble_chapters(flow_items: Sequence[FlowItem]) -> list[Chapter]:
             current_has_body = False
             has_started_chapter = True
         else:
+            if (
+                not has_started_chapter
+                and current_title is None
+                and isinstance(item, DetectedHeading)
+                and item.level < chapter_level
+            ):
+                current_title = item.text
+                current_level = item.level
             current_blocks.append(domain_block)
             if not isinstance(item, DetectedHeading):
                 current_has_body = True

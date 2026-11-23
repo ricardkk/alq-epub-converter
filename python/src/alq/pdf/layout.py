@@ -70,6 +70,20 @@ def is_two_column_layout(
     if not left_blocks or not right_blocks:
         return False
 
+    spanning_blocks = [
+        b
+        for b in blocks
+        if b.bbox.x0 < mid_x - gutter_tolerance and b.bbox.x1 > mid_x + gutter_tolerance
+    ]
+    spanning_chars = sum(len(b.text.strip()) for b in spanning_blocks)
+    left_chars = sum(len(b.text.strip()) for b in left_blocks)
+    right_chars = sum(len(b.text.strip()) for b in right_blocks)
+
+    if spanning_chars > 0 and (
+        spanning_chars >= (left_chars + right_chars) or min(left_chars, right_chars) < 10
+    ):
+        return False
+
     max_left_x1 = max(b.bbox.x1 for b in left_blocks)
     min_right_x0 = min(b.bbox.x0 for b in right_blocks)
     return (min_right_x0 - max_left_x1) >= -_MAX_COLUMN_OVERLAP_PT
